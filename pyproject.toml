@@ -1,6 +1,6 @@
 [project]
 name = "monthlight"
-version = "0.1.3"
+version = "0.2.0"
 description = "A self-hosted personal finance app: bank sync through Plaid, budgets, and a Copilot Money import"
 readme = "README.md"
 license = "MIT"
