@@ -227,9 +227,24 @@ def fetch_updates(client: PlaidClient, access_token: str, cursor: str | None) ->
                 raise
 
 
+def purchase_time(value: str | None) -> datetime | None:
+    """Returns the bank's purchase time `value` in the app's time zone (the TZ setting); None when it's missing,
+    unreadable or a bank's default midnight, which Plaid's docs warn about."""
+    if not value or "T00:00:00" in value:
+        return None
+    try:
+        return datetime.fromisoformat(value).astimezone()
+    except ValueError:
+        return None
+
+
 def _txn_date(t: dict) -> date:
-    # Plaid suggests the authorized date (when you made the purchase) for display.
-    return date.fromisoformat(t.get("authorized_date") or t["date"])
+    """Returns the day transaction `t` was made:
+    - with a purchase time from the bank: that time's day in the app's time zone
+    - else with a purchase date: that date, as Plaid suggests for display
+    - else: its date, the posting day or the day a pending one was made"""
+    made_at = purchase_time(t.get("authorized_datetime"))  # NOTE: some banks' purchase date is the UTC day
+    return made_at.date() if made_at else date.fromisoformat(t.get("authorized_date") or t["date"])
 
 
 def _display_name(t: dict) -> str:

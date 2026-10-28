@@ -445,6 +445,18 @@ def test_a_posted_transaction_keeps_the_day_it_was_made(conn):
     assert (by_id["t4"]["date"], by_id["t4"]["name"]) == ("2026-10-09", "Rent share")
 
 
+def test_a_purchase_time_dates_a_transaction_in_the_app_time_zone(conn, pacific):
+    evening = plaid_txn("t1", 20.0, "2026-10-10", "DINNER")
+    evening.update(authorized_date="2026-10-09", authorized_datetime="2026-10-09T01:30:00Z")  # 6:30 pm on Oct 8, Pacific time
+    midnight = plaid_txn("t2", 5.0, "2026-10-10", "PARKING")
+    midnight.update(authorized_date="2026-10-09", authorized_datetime="2026-10-09T00:00:00Z")  # a bank's default time
+    fake = FakePlaid(pages={None: page([evening, midnight], "c1")})
+    link(conn, fake)
+    sync.sync_item(conn, fake, "item-1")
+    by_id = rows(conn)
+    assert (by_id["t1"]["date"], by_id["t2"]["date"]) == ("2026-10-08", "2026-10-09")
+
+
 def test_what_else_the_bank_says_is_kept_and_kept_current(conn):
     detailed = plaid_txn("t1", 23.45, "2026-10-09", "SQ *CORNER BAKERY 123", merchant="Corner Bakery", pfc="FOOD_AND_DRINK_RESTAURANT")
     detailed.update(authorized_date="2026-10-07", authorized_datetime="2026-10-07T18:22:00Z", payment_channel="in store",

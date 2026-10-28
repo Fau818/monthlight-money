@@ -55,7 +55,7 @@ They live in `.env`. After changing one, run `docker compose up -d`.
 |---|---|
 | `PLAID_CLIENT_ID`, `PLAID_SANDBOX_SECRET`, `PLAID_PRODUCTION_SECRET` | Your Plaid keys, from https://dashboard.plaid.com/developers/keys. |
 | `PLAID_ENV` | `sandbox` for Plaid's test banks, `production` for your real ones. |
-| `TZ` | Your time zone, like `America/Chicago`. Empty means UTC. |
+| `TZ` | Your time zone, like `America/New_York`, for today's date and the day each purchase falls on. Empty means UTC. |
 | `SYNC_INTERVAL_HOURS` | Hours between automatic syncs, 6 unless you set it; 0 turns them off. |
 | `REMOTE_HOSTS` | Optional: the names your other devices reach the app by (see [remote access](docs/remote-access.md)). |
 

@@ -1,3 +1,4 @@
+import time
 from datetime import date
 
 import pytest
@@ -99,6 +100,16 @@ class FixedDate(date):
 def fixed_today(monkeypatch):
     for module in (main, recurring, reports, sync):
         monkeypatch.setattr(module, "date", FixedDate)
+
+
+@pytest.fixture
+def pacific(monkeypatch):
+    """Runs a test with the app's time zone set to US Pacific time, the way TZ sets it, and puts the zone back after."""
+    monkeypatch.setenv("TZ", "America/Los_Angeles")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
 
 
 @pytest.fixture

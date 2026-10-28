@@ -1711,13 +1711,16 @@ def transfer_problem(conn, t, other) -> str | None:
 
 def bank_details(t) -> dict:
     """Returns what the bank says about transaction `t` (sync._details) for its page, with the time it was made as local
-    time, like "6:22 PM"; an empty dict when there's nothing."""
+    time, like "6:22 PM", and the day it was made as that time's local day; an empty dict when there's nothing."""
     details = json.loads(t["plaid_details"]) if t["plaid_details"] else {}
     if details.get("time"):
-        try:
-            details["time"] = datetime.fromisoformat(details["time"]).astimezone().strftime("%-I:%M %p")
-        except ValueError:
+        made_at = sync.purchase_time(details["time"])
+        if made_at is None:
             del details["time"]
+        else:
+            details["time"] = made_at.strftime("%-I:%M %p")
+            if details.get("made"):
+                details["made"] = made_at.date().isoformat()  # NOTE: some banks' purchase date is the UTC day
     return details
 
 

@@ -7,7 +7,7 @@ from html import unescape
 from fastapi.testclient import TestClient
 
 from app import reports, sync
-from app.main import create_app, find_transactions
+from app.main import bank_details, create_app, find_transactions
 from app.plaid_client import PlaidError
 from tests.conftest import COPILOT_CSV, FakePlaid, page, plaid_account, plaid_txn
 
@@ -653,6 +653,13 @@ def test_a_transactions_page_shows_what_the_bank_says(client, settings):
     joes = conn.execute("SELECT id FROM transactions WHERE name = 'Trader Joe''s' AND date = '2026-09-08'").fetchone()[0]
     assert "From your bank" not in client.get(f"/transactions/{joes}").text  # nothing from a bank for this one
     conn.close()
+
+
+def test_the_bank_card_shows_the_purchase_time_in_the_app_time_zone(pacific):
+    card = lambda details: bank_details({"plaid_details": json.dumps(details)})
+    evening = card({"made": "2026-10-09", "time": "2026-10-09T01:30:00Z", "posted": "2026-10-10"})
+    assert (evening["made"], evening["time"], evening["posted"]) == ("2026-10-08", "6:30 PM", "2026-10-10")
+    assert card({"made": "2026-10-09", "time": "2026-10-09T00:00:00Z"}) == {"made": "2026-10-09"}  # a bank's default midnight
 
 
 def test_accounts_can_be_added_archived_or_hidden_and_the_picker_follows(client, settings):
