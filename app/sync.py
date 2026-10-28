@@ -316,7 +316,8 @@ def _update_existing(conn: sqlite3.Connection, t: dict, lookup_id: str, categori
         "original": t.get("original_description") or t.get("name"), "pfc": _plaid_category(t),
         "logo": t.get("logo_url"), "name": _display_name(t), "details": _details(t),
         # The user's date is the day the money was spent: when a pending transaction posts without a purchase date
-        # (authorized_date), it keeps the pending day rather than moving to the posting day.
+        # (authorized_date), it keeps the pending day if that's the earlier one. A charge posts days after it was made,
+        # but some banks date a transfer's posting a day before it showed as pending.
         "keep": int(posting and not t.get("authorized_date")),
     }
     # A date the user set by hand stays, even when the bank moves it (a pending charge can post on another day).
@@ -327,7 +328,7 @@ def _update_existing(conn: sqlite3.Connection, t: dict, lookup_id: str, categori
     elif row["user_edited"]:
         conn.execute(
             """UPDATE transactions SET plaid_transaction_id = :pid, amount = :amount, pending = :pending,
-                      date = CASE WHEN date_edited OR :keep THEN date ELSE :date END,
+                      date = CASE WHEN date_edited THEN date WHEN :keep THEN min(date, :date) ELSE :date END,
                       original_name = :original, plaid_category = :pfc, logo_url = :logo, plaid_details = :details
                WHERE id = :id""",
             fields,
@@ -337,7 +338,7 @@ def _update_existing(conn: sqlite3.Connection, t: dict, lookup_id: str, categori
             fields["name"], fields["original"], fields["pfc"], _plaid_confidence(t), row["account_type"])
         conn.execute(
             """UPDATE transactions SET plaid_transaction_id = :pid, amount = :amount, pending = :pending,
-                      date = CASE WHEN date_edited OR :keep THEN date ELSE :date END,
+                      date = CASE WHEN date_edited THEN date WHEN :keep THEN min(date, :date) ELSE :date END,
                       name = :name, original_name = :original, plaid_category = :pfc, logo_url = :logo, plaid_details = :details,
                       category_id = :category, type = :type
                WHERE id = :id""",

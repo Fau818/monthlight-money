@@ -404,15 +404,24 @@ def test_a_posted_transaction_keeps_the_day_it_was_made(conn):
     purchase_dated["authorized_date"] = "2026-10-08"
     fake = FakePlaid(pages={
         None: page([plaid_txn("p1", 12.0, "2026-10-08", "BLUE BOTTLE", pending=True),
-                    plaid_txn("p2", 30.0, "2026-10-09", "SHOP", pending=True)], "c1"),
-        "c1": page([plaid_txn("t1", 12.0, "2026-10-11", "BLUE BOTTLE", pending_id="p1"), purchase_dated], "c2", removed=["p1", "p2"]),
+                    plaid_txn("p2", 30.0, "2026-10-09", "SHOP", pending=True),
+                    plaid_txn("p3", 50.0, "2026-10-10", "TRANSFER OUT", pending=True),
+                    plaid_txn("p4", 25.0, "2026-10-10", "ZELLE PAYMENT", pending=True)], "c1"),
+        "c1": page([plaid_txn("t1", 12.0, "2026-10-11", "BLUE BOTTLE", pending_id="p1"), purchase_dated,
+                    plaid_txn("t3", 50.0, "2026-10-09", "TRANSFER OUT", pending_id="p3"),
+                    plaid_txn("t4", 25.0, "2026-10-09", "ZELLE PAYMENT", pending_id="p4")], "c2", removed=["p1", "p2", "p3", "p4"]),
     })
     link(conn, fake)
     sync.sync_item(conn, fake, "item-1")
+    with conn:
+        conn.execute("UPDATE transactions SET name = 'Rent share', user_edited = 1 WHERE plaid_transaction_id = 'p4'")
     sync.sync_item(conn, fake, "item-1")
     by_id = rows(conn)
     assert (by_id["t1"]["date"], by_id["t1"]["pending"]) == ("2026-10-08", 0)  # no purchase date from the bank: the pending day stays
     assert by_id["t2"]["date"] == "2026-10-08"  # the bank's purchase date wins over both
+    # Some banks date a transfer's posting a day before it showed as pending: the earlier day wins, edited or not.
+    assert by_id["t3"]["date"] == "2026-10-09"
+    assert (by_id["t4"]["date"], by_id["t4"]["name"]) == ("2026-10-09", "Rent share")
 
 
 def test_what_else_the_bank_says_is_kept_and_kept_current(conn):
