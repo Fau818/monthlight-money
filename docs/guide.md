@@ -25,7 +25,7 @@ New transactions wait on **Dashboard → To review** and **Transactions → To r
 
 ## Editing a transaction
 
-Click a transaction to open it in a panel over the list; the list stays where it was when you save or close it. A transaction's date is the day you spent the money, not the day it posted, and your bank's updates never move it to a later day. A date you set by hand stays, whatever the bank says later.
+Click a transaction to open it beside the list (over it on a smaller screen); the list stays where it was. Changes save as soon as you make them: the name, the date, the category, notes, tags, the type and **Reviewed**. **Split** and **Recurring** are at the top, and the rarer actions, like linking a payback or the other side of a move, are under **⋯**. A transaction's date is the day you spent the money, not the day it posted, and your bank's updates never move it to a later day. A date you set by hand stays, whatever the bank says later.
 
 ## Leaving something out of spending
 
@@ -33,21 +33,21 @@ Pick **🚫 Excluded** in its category menu, in the list or on its page. A trans
 
 ## Splitting a transaction
 
-Open it and use **Split this transaction**: give each part an amount, a category and a name. Leave one amount empty and it gets what's left. In the list, the split gets a row of its own with its parts under it, each counting in its own category. Open a part to change its type, notes or tags, or to exclude it. Open the split's row to change the parts, rename it, change its date (its parts share it) or unsplit it.
+Open it and press **Split**: give each part an amount, a category and a name. Leave one amount empty and it gets what's left. In the list, the split gets a row of its own with its parts under it, each counting in its own category. Open a part to change its type, notes or tags, or to exclude it. Open the split's row to rename it, change its date (its parts share it), use **Change the split**, or unsplit it from **⋯**.
 
 If your bank later changes the amount (a tip, say), the split comes back to **To review** so you can fix the parts.
 
 ## Putting a split back together
 
-For items you split in Copilot Money that have no bank transaction to rebuild them from (say, on a card that isn't connected), open one and use **Combine with others into one**: tick the others and name it. They then show together, each keeping its category. **Ungroup** separates them again, each on its own date.
+For items you split in Copilot Money that have no bank transaction to rebuild them from (say, on a card that isn't connected), open one and pick **Combine with others into one** under **⋯**: tick the others and name it. They then show together, each keeping its category. **Ungroup**, under **⋯** on the combined line, separates them again, each on its own date.
 
 ## When friends pay you back
 
-Open the money they sent and choose the purchase under **Paying you back for a purchase?**, or add it from the purchase's page. The purchase then counts only your share, in its own month and category. When friends send more than it cost (rounding up, say), it's paid back in full and the extra counts like a refund.
+Open the money they sent and pick **Link the purchase it pays back** under **⋯**, or **Link a friend's payback** on the purchase. The purchase then counts only your share, in its own month and category. When friends send more than it cost (rounding up, say), it's paid back in full and the extra counts like a refund.
 
 ## Moves between your own accounts
 
-When both sides of a move arrive (opposite amounts on two of your accounts, within 3 days), they're paired, marked ↔, and never count as spending or income. Paired moves are hidden from the list; **Show** brings them back. A transfer without its other side stays visible, since it may have gone to someone else. You can pair or unpair the other side by hand on a transaction's page.
+When both sides of a move arrive (opposite amounts on two of your accounts, within 3 days), they're paired, marked ↔, and never count as spending or income. Paired moves are hidden from the list; **Show** brings them back. A transfer without its other side stays visible, since it may have gone to someone else. You can pair the other side by hand with **Link the other side of a move** under **⋯**, or unpair it.
 
 ## Linking transactions that belong together
 
@@ -59,7 +59,7 @@ Rent paid in two payments, say: **Transactions → Select**, tick them, and pres
 
 ## Tags
 
-On a transaction's page, switch tags on or off or type new ones. Pick a tag above the list to see everything with it, and take it off all of them at once from there. Rename, recolor or delete tags on **Categories & rules**.
+On a transaction, type a tag to add it (an existing one or a new one), or press × on one to take it off. Pick a tag above the list to see everything with it, and take it off all of them at once from there. Rename, recolor or delete tags on **Categories & rules**.
 
 ## Cash, gift cards and store credit
 

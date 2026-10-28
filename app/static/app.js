@@ -53,6 +53,8 @@ function swapIn(page, url) {
   startToast();
   refreshSplits();
   updatePicks();
+  watchOlder();
+  markOpen();
 }
 
 // Forms are posted to their action attribute: form.action would give a field named "action" instead, if one exists.
@@ -63,22 +65,136 @@ async function fetchPage(url, options) {
   return { page, url: response.url };
 }
 
-// Transactions open in a panel over the page instead of on their own page, so the list behind stays where it was.
+// Transactions open in a pane instead of on their own page, so the list stays where it was: beside the list on a wide
+// screen, where the list can still be used and another row opens in its place, and over the page elsewhere.
 const drawer = document.querySelector("[data-drawer]");
+const wide = window.matchMedia("(min-width: 1280px)");
+let openId = null;  // the transaction the pane shows
+
+// Lights up the row of the transaction in the pane, if the list has it.
+function markOpen() {
+  for (const row of document.querySelectorAll(".txn.selected")) row.classList.remove("selected");
+  const row = drawer && drawer.open && openId && (document.getElementById(`t${openId}`) || document.getElementById(`split${openId}`));
+  if (row) row.classList.add("selected");
+}
+
+function showDrawer() {
+  const docked = wide.matches;
+  if (drawer.open && drawer.classList.contains("docked") !== docked) drawer.close();
+  drawer.classList.toggle("docked", docked);
+  document.body.classList.toggle("pane-open", docked);
+  if (!drawer.open) {
+    if (docked) drawer.show();
+    else drawer.showModal();
+  }
+}
+
+// Puts the transaction's sheet `sheet` in the pane. When it's the one already there, after a change that sent `sent`,
+// the field with the focus keeps it, and what was typed in it since, and so do the scroll position and the actions shown.
+function showSheet(sheet, sent = null) {
+  const body = drawer.querySelector(".drawer-body");
+  const same = openId === sheet.dataset.transaction;
+  const active = document.activeElement;
+  const typing = same && active && body.contains(active) && active.name && active.matches("input:not([type=checkbox], [type=radio]), textarea, select") ? active : null;
+  const kept = typing && { name: typing.name, value: typing.value, start: typing.selectionStart, end: typing.selectionEnd };
+  const shown = same ? [...body.querySelectorAll("[data-panel].shown")].map((panel) => panel.dataset.panel) : [];
+  const scroll = same ? body.scrollTop : 0;
+  body.replaceChildren(sheet);
+  if (!document.documentElement.classList.contains("no-date-picker")) quietDates(sheet);
+  openId = sheet.dataset.transaction;
+  for (const name of shown) showPanel(sheet, name, false);
+  refreshSplits();
+  body.scrollTop = scroll;
+  if (kept) {
+    const again = body.querySelector(`[name="${CSS.escape(kept.name)}"]`);
+    if (again) {
+      if (again.tagName !== "SELECT" && !(sent && sent.get(kept.name) === kept.value)) again.value = kept.value;
+      again.focus({ preventScroll: true });
+      if (again.setSelectionRange && kept.start !== null) again.setSelectionRange(kept.start, kept.end);
+    }
+  }
+}
 
 async function openTransaction(url) {
   const { page } = await fetchPage(url);
   const sheet = page.querySelector(".sheet");
   if (!sheet) throw new Error("No transaction on that page");
-  drawer.querySelector(".drawer-body").replaceChildren(sheet);
-  refreshSplits();
-  if (!drawer.open) drawer.showModal();
-  drawer.querySelector(".drawer-body").scrollTop = 0;
+  showSheet(sheet);
+  showDrawer();
+  markOpen();
 }
 
 function closeDrawer() {
   if (drawer && drawer.open) drawer.close();
 }
+
+if (drawer) {
+  drawer.addEventListener("close", () => {
+    if (drawer.open) return;  // NOTE: the event comes later; reopened in the meantime (docked or not), it stays open
+    document.body.classList.remove("pane-open");
+    openId = null;
+    markOpen();
+  });
+  wide.addEventListener("change", () => { if (drawer.open) showDrawer(); });  // docked or over the page, as the width allows
+  document.addEventListener("keydown", (event) => {
+    // A pane over the page closes with Escape by itself; one beside the list, here.
+    if (event.key === "Escape" && drawer.open && drawer.classList.contains("docked") && !event.defaultPrevented) closeDrawer();
+  });
+}
+
+// The buttons and the menu at the top of a transaction show its rarer actions, one at a time; the same button again
+// hides it.
+function showPanel(sheet, name, focus = true) {
+  let shown = null;
+  for (const panel of sheet.querySelectorAll("[data-panel]")) {
+    const show = panel.dataset.panel === name && !(focus && panel.classList.contains("shown"));
+    panel.classList.toggle("shown", show);
+    if (show) {
+      panel.open = true;
+      shown = panel;
+    }
+  }
+  if (shown && focus) {
+    shown.scrollIntoView({ block: "nearest", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+    const field = shown.querySelector("select, input:not([type=hidden]), textarea, button");
+    if (field) field.focus({ preventScroll: true });
+  }
+}
+
+document.addEventListener("click", (event) => {
+  const button = event.target.closest && event.target.closest("[data-show]");
+  if (!button) return;
+  showPanel(button.closest(".sheet"), button.dataset.show);
+  const menu = button.closest("details.more-menu");
+  if (menu) menu.removeAttribute("open");
+});
+
+// A transaction's day shows as words, which open the date picker of the date field kept unseen behind them. Browsers
+// that can't open it from a script show the date field itself.
+if (!("showPicker" in HTMLInputElement.prototype)) document.documentElement.classList.add("no-date-picker");
+
+function quietDates(root) {
+  for (const input of root.querySelectorAll(".sheet-date input[type=date]")) input.tabIndex = -1;  // its words take the focus
+}
+
+document.addEventListener("click", (event) => {
+  const button = event.target.closest && event.target.closest("[data-pick-date]");
+  if (!button) return;
+  const input = button.parentElement.querySelector("input[type=date]");
+  try {
+    input.showPicker();
+  } catch (error) {
+    document.documentElement.classList.add("no-date-picker");
+    input.focus();
+  }
+});
+if (!document.documentElement.classList.contains("no-date-picker")) quietDates(document);
+
+// A transaction's fields save as soon as they change; text, once it's left.
+document.addEventListener("change", (event) => {
+  const form = event.target.form;
+  if (form && form.matches("form[data-autosave]")) form.requestSubmit();
+});
 
 document.addEventListener("click", (event) => {
   if (!drawer || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -87,7 +203,7 @@ document.addEventListener("click", (event) => {
     closeDrawer();
     return;
   }
-  const link = event.target.closest && event.target.closest("a.txn-name, a.linked, a.link-badge:not([data-jump])");
+  const link = event.target.closest && event.target.closest("a.txn-name, a.linked, a.mark:not([data-jump])");
   if (!link) return;
   event.preventDefault();
   openTransaction(link.href).catch(() => window.location.assign(link.href));
@@ -100,8 +216,10 @@ document.addEventListener("submit", async (event) => {
   const form = event.target;
   if (event.defaultPrevented || !drawer || !drawer.contains(form)) return;
   event.preventDefault();
+  if (form.matches("[data-autosave]")) form.elements.quiet.value = "1";  // the pane shows it's saved; no message needed
+  const sent = new FormData(form, event.submitter);
   try {
-    const { page, url } = await fetchPage(form.getAttribute("action"), { method: "POST", body: new FormData(form, event.submitter) });
+    const { page, url } = await fetchPage(form.getAttribute("action"), { method: "POST", body: sent });
     const sheet = page.querySelector(".sheet");
     if (!sheet) {
       if (new URL(url).pathname !== window.location.pathname) {
@@ -112,8 +230,7 @@ document.addEventListener("submit", async (event) => {
       swapIn(page, url);
       return;
     }
-    drawer.querySelector(".drawer-body").replaceChildren(sheet);
-    refreshSplits();
+    showSheet(sheet, sent);
     const toast = page.querySelector("[data-toast]");
     const behind = await fetchPage(window.location.href);
     swapIn(behind.page, behind.url);
@@ -135,6 +252,7 @@ document.addEventListener("submit", async (event) => {
   const focused = document.activeElement;
   const focusRow = focused && focused.closest("[id]") ? focused.closest("[id]").id : null;
   const focusName = focused ? focused.getAttribute("name") : null;
+  if (form.matches("[data-autosave]")) form.elements.quiet.value = "1";  // a transaction on its own page, saved as it changed
   try {
     const { page, url } = await fetchPage(form.getAttribute("action"), { method: "POST", body: new FormData(form, event.submitter) });
     if (new URL(url).pathname !== window.location.pathname) {
@@ -150,6 +268,34 @@ document.addEventListener("submit", async (event) => {
   }
 });
 
+// Earlier months load as the list nears their link: the page that lists them too takes this one's place, keeping the
+// scroll position and what's ticked, and its address, so later changes come back with every month loaded. Without
+// JavaScript the link opens that page.
+const olderWatch = "IntersectionObserver" in window
+  ? new IntersectionObserver((seen) => { for (const entry of seen) if (entry.isIntersecting) loadOlder(entry.target); }, { rootMargin: "800px 0px" })
+  : null;
+
+function watchOlder() {
+  const link = document.querySelector("[data-older]");
+  if (link && olderWatch) olderWatch.observe(link);
+}
+
+async function loadOlder(link) {
+  olderWatch.unobserve(link);
+  const ticked = new Set([...document.querySelectorAll("input.pick:checked")].map((pick) => pick.value));
+  const focused = document.activeElement && document.activeElement.closest("main") ? document.activeElement.getAttribute("name") : null;
+  try {
+    const { page, url } = await fetchPage(link.href.split("#")[0]);
+    swapIn(page, url);
+  } catch (error) {
+    return;  // the link stays, to open the page by hand
+  }
+  for (const pick of document.querySelectorAll("input.pick")) pick.checked = ticked.has(pick.value);
+  updatePicks();
+  const again = focused && document.querySelector(`main [name="${CSS.escape(focused)}"]`);
+  if (again) again.focus({ preventScroll: true });
+}
+
 // The message after an action fades after a few seconds, or stays a while when it offers something to do.
 function startToast() {
   const toast = document.querySelector("[data-toast]");
@@ -162,6 +308,7 @@ function startToast() {
   toast.querySelector("[data-toast-close]").addEventListener("click", close);
 }
 startToast();
+watchOlder();
 
 // Rows that belong together (a purchase and its paybacks, the two sides of a move, linked transactions) light up
 // together: those sharing a word of data-link.

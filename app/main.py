@@ -21,6 +21,7 @@ from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Request, 
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import backup, categorize, charts, copilot_import, links, looks, recurring, reports, splits, sync, tags
@@ -56,6 +57,11 @@ def money(value: float | None) -> str:
 def amount(value: float) -> str:
     """Returns a transaction amount the way Copilot shows it: spending plain, money in with a "+"."""
     return f"{'+' if value > 0 else ''}${abs(value):,.2f}"
+
+
+def amount_html(value: float) -> Markup:
+    """Returns a transaction amount as `amount` writes it, with a small "$", as Copilot lists them."""
+    return Markup(f'{"+" if value > 0 else ""}<span class="cur">$</span>{abs(value):,.2f}')
 
 
 def ago(value: str | None) -> str:
@@ -141,8 +147,8 @@ def plural(count: int, word: str, many: str | None = None) -> str:
 
 
 templates.env.filters.update(
-    money=money, amount=amount, ago=ago, month_label=month_label, month_name=month_name, plaid_label=plaid_label,
-    money_parts=money_parts, short_date=short_date, day_label=day_label, days_until=days_until,
+    money=money, amount=amount, amount_html=amount_html, ago=ago, month_label=month_label, month_name=month_name,
+    plaid_label=plaid_label, money_parts=money_parts, short_date=short_date, day_label=day_label, days_until=days_until,
     compact_money=charts.compact_money,
 )
 # Part of the script and stylesheet URLs, so browsers fetch new versions instead of using a cached old one.
@@ -206,6 +212,7 @@ def render(request: Request, conn, template: str, **context) -> Response:
         "review_count": conn.execute(f"SELECT count(*) FROM transactions t WHERE t.reviewed = 0 OR {reports.SPLIT_OFF}").fetchone()[0],
         "last_synced": conn.execute("SELECT max(last_synced_at) FROM plaid_items").fetchone()[0],
         "side_groups": sidebar_groups(conn, set((request.cookies.get(FOLDED_COOKIE) or "").split(","))),
+        "account_labels": account_labels(conn),
         **context,
     })
     if raw:
@@ -394,10 +401,9 @@ def register_routes(app: FastAPI) -> None:
 
     @app.get("/transactions")
     def transactions(request: Request, month: str = "", account: str = "", category: str = "", type: str = "", tag: str = "",
-                     amount: str = "", q: str = "", review: str = "", transfers: str = "", select: str = "", page: int = 1,
+                     amount: str = "", q: str = "", review: str = "", transfers: str = "", select: str = "", oldest: str = "",
                      conn=Depends(get_db)):
         month = reports.valid_month(month) or ""
-        page = min(max(page, 1), 1_000_000)  # NOTE: a far bigger page would overflow SQLite's offset
         account = account if account.isdigit() else ""  # a hand-typed URL can hold anything; ignore what isn't an id
         category = category if category == "none" or category.isdigit() else ""
         type_ = type if type in categorize.TYPES else None
@@ -408,11 +414,21 @@ def register_routes(app: FastAPI) -> None:
         # transfer without its other side shows, since it may be money that went to someone else. The review list
         # shows every new one once; looking for an amount shows them all, as the other side may be what's looked for.
         hide = transfers != "1" and type_ is None and not criteria["review"] and not criteria["amount"]
-        rows, total = find_transactions(conn, **criteria, type_=type_, hide_transfers=hide,
-                                        limit=PAGE_SIZE, offset=(page - 1) * PAGE_SIZE)
+        # The list goes a few months at a time, newest first, through `oldest` once more were loaded (app.js does that
+        # as it scrolls near the end): whole months, as many as it takes to list PAGE_SIZE transactions or more.
+        months_listed = listed_months(conn, **criteria, type_=type_, hide_transfers=hide)
+        shown = month_chunk(months_listed, months_listed[0][0], reports.valid_month(oldest)) if months_listed and not month else []
+        rest = [m for m, _ in months_listed if shown and m < shown[-1]]
+        older = month_chunk(months_listed, rest[0]) if rest else []
+        between = (reports.month_range(shown[-1])[0], reports.month_range(shown[0])[1]) if shown else None
+        rows, _ = find_transactions(conn, **criteria, between=between, type_=type_, hide_transfers=hide, limit=-1)
         hidden = find_transactions(conn, **criteria, linked_transfers=True, limit=0)[1] if hide else 0
         filters = {k: v for k, v in {"month": month, "account": account, "category": category, "type": type, "tag": tag,
                                      "amount": amount, "q": q, "review": review, "transfers": transfers, "select": select}.items() if v}
+        # Each month starts with its totals, as on the dashboard, when the list shows all of it.
+        whole_months = set(filters) <= {"month", "transfers", "select"}
+        today = date.today()
+        budget = reports.budget_total(reports.category_spending(conn, reports.current_month(today))) if whole_months else 0
 
         def without(*keys: str) -> str:
             rest = {k: v for k, v in filters.items() if k not in keys}
@@ -420,8 +436,10 @@ def register_routes(app: FastAPI) -> None:
 
         return render(
             request, conn, "transactions.html",
-            groups=group_by_day(rows, date.today()), rows=rows, total=total, page=page,
-            pages=max(1, -(-total // PAGE_SIZE)), filters=filters, query=urlencode(filters),
+            months=[dict(m, totals=reports.month_totals(conn, m["month"]) if whole_months else None, budget=budget,
+                         current=m["month"] == reports.current_month(today)) for m in by_month(group_by_day(rows, today))],
+            rows=rows, total=sum(n for _, n in months_listed), filters=filters, query=urlencode(filters),
+            older=older and "/transactions?" + urlencode({**filters, "oldest": older[-1]}) + f"#m{older[0]}", older_month=older and older[0],
             sums=transaction_sums(conn, **criteria, type_=type_, hide_transfers=hide),
             amount_unreadable=bool(amount) and criteria["amount"] is None,
             categories=category_options(conn), hidden_transfers=hidden,
@@ -430,7 +448,7 @@ def register_routes(app: FastAPI) -> None:
             review_link="/transactions?" + urlencode({**filters, "review": "1"}), all_link=without("review"),
             selecting=select == "1", select_link="/transactions?" + urlencode({**filters, "select": "1"}), done_link=without("select"),
             accounts=conn.execute("SELECT id, name, mask FROM accounts ORDER BY name").fetchall(),
-            months=[r[0] for r in conn.execute("SELECT DISTINCT substr(date, 1, 7) FROM transactions ORDER BY 1 DESC")],
+            month_options=[r[0] for r in conn.execute("SELECT DISTINCT substr(date, 1, 7) FROM transactions ORDER BY 1 DESC")],
         )
 
     # Registered before /transactions/{tid}, which would otherwise take "new" for a transaction id.
@@ -529,15 +547,7 @@ def register_routes(app: FastAPI) -> None:
             learned = learn_plaid_mapping(conn, t["plaid_category"], new_category)
         name = category_name(conn, new_category)
         message = f"“{t['name']}” is now {name or 'uncategorized'}." + (" Similar new transactions will be too." if learned else "")
-        offer = None
-        if new_category is not None:
-            others = conn.execute(
-                "SELECT count(*) FROM transactions WHERE id != ? AND user_edited = 0 AND lower(trim(name)) = lower(trim(?)) "
-                "AND coalesce(category_id, -1) != ?",
-                (tid, t["name"], new_category),
-            ).fetchone()[0]
-            offer = {"id": tid, "name": t["name"], "category": name, "others": others}
-        return redirect(safe_back(back, "/transactions"), message, rule_offer=offer)
+        return redirect(safe_back(back, "/transactions"), message, rule_offer=rule_offer(conn, t, new_category))
 
     @app.post("/transactions/review")
     def mark_reviewed(ids: list[int] = Form([]), back: str = Form("/transactions"), conn=Depends(get_db)):
@@ -675,6 +685,7 @@ def register_routes(app: FastAPI) -> None:
             tag_ids={r[0] for r in conn.execute("SELECT tag_id FROM transaction_tags WHERE transaction_id = ?", (tid,))},
             bank=bank_details(t),
             recurring_list=conn.execute("SELECT id, name FROM recurring ORDER BY name").fetchall(),
+            own_names=dict(conn.execute("SELECT id, name FROM categories").fetchall()),
         )
 
     @app.post("/transactions/{tid}/split")
@@ -784,9 +795,9 @@ def register_routes(app: FastAPI) -> None:
 
     @app.post("/transactions/{tid}/whole")
     def save_whole(tid: int, name: str = Form(""), day: str = Form("", alias="date"), back: str = Form("/transactions"),
-                   conn=Depends(get_db)):
+                   quiet: str = Form(""), conn=Depends(get_db)):
         """Renames transaction `tid`, split into parts (or combined from them), or changes its date, which its parts
-        take too (db.py). Each part keeps its own name."""
+        take too (db.py). Each part keeps its own name. `quiet` (saved as it changed, app.js) leaves out the message."""
         t = get_transaction(conn, tid)
         page = safe_back(back, f"/transactions/{tid}")
         if t["split_from_id"]:
@@ -800,6 +811,8 @@ def register_routes(app: FastAPI) -> None:
             # Set by hand, so the bank's later updates keep them (sync._update_existing).
             conn.execute("UPDATE transactions SET name = ?, date = ?, user_edited = max(user_edited, ?), date_edited = max(date_edited, ?) WHERE id = ?",
                          (name, when, int(name != t["name"]), int(when != t["date"]), tid))
+        if quiet:
+            return redirect(page)
         return redirect(page, f"Saved. It's dated {short_date(when)}, and so are its parts." if when != t["date"] else "Saved.")
 
     @app.post("/transactions/{tid}/unlink")
@@ -822,7 +835,9 @@ def register_routes(app: FastAPI) -> None:
                          excluded: str = Form(""), notes: str = Form(""), reviewed: str = Form(""),
                          recurring_id: str = Form(""), make_rule: str = Form(""), back: str = Form("/transactions"),
                          day: str = Form("", alias="date"), tags_shown: str = Form(""), tag_ids: list[int] = Form([]),
-                         new_tags: str = Form(""), conn=Depends(get_db)):
+                         new_tags: str = Form(""), quiet: str = Form(""), conn=Depends(get_db)):
+        """Saves the transaction's form. `quiet` (a field saved as it changed, app.js) leaves out the word that it's
+        saved, which the page already shows, but still offers a rule when the category changed."""
         t = get_transaction(conn, tid)
         if splits.parts_of(conn, tid):
             return redirect(f"/transactions/{tid}?{urlencode({'back': safe_back(back, '/transactions')})}",
@@ -878,7 +893,12 @@ def register_routes(app: FastAPI) -> None:
                 message = f"Saved, and {changed} other transactions named “{new['name']}” were updated. New ones will match too."
             if new["type"] == "transfer":
                 sync.pair_own_transfers(conn)  # the other side of a move between the user's accounts follows
-        return redirect(safe_back(back, "/transactions"), message)
+        offer = None
+        if new["category_id"] != t["category_id"] and not make_rule:
+            offer = rule_offer(conn, get_transaction(conn, tid), new["category_id"])
+        if quiet and not make_rule:
+            message = f"“{new['name']}” is now {category_name(conn, new['category_id'])}." if offer else None
+        return redirect(safe_back(back, "/transactions"), message, rule_offer=offer)
 
     @app.post("/rules/from-transaction/{tid}")
     def rule_from_transaction(tid: int, back: str = Form("/transactions"), conn=Depends(get_db)):
@@ -1363,6 +1383,13 @@ SHOWN_DAY = f"""CASE WHEN t.type = 'transfer' AND t.amount > 0 AND ot.id IS NOT 
                      ELSE {_linked_day('t')} END"""
 
 
+def account_labels(conn) -> dict[int, str]:
+    """Returns each account's name as lists show it, by id: with its last digits when another account has that name."""
+    rows = conn.execute("SELECT id, name, mask FROM accounts").fetchall()
+    names = Counter(r["name"] for r in rows)
+    return {r["id"]: f"{r['name']} ••{r['mask']}" if names[r["name"]] > 1 and r["mask"] else r["name"] for r in rows}
+
+
 def sidebar_groups(conn, folded: set[str]) -> list[dict]:
     """Returns the sidebar's accounts by group: each group's "kind", "label", "balance", whether it's "folded" (its kind
     is in `folded`), and its "accounts" in use (not hidden or archived), with their balances shown the way the Accounts
@@ -1378,6 +1405,37 @@ def sidebar_groups(conn, folded: set[str]) -> list[dict]:
     for a in (a for g in groups for a in g["accounts"]):
         a["label"] = f"{a['name']} ••{a['mask']}" if names[a["name"]] > 1 and a["mask"] else a["name"]
     return groups
+
+
+def listed_months(conn, **criteria) -> list[tuple[str, int]]:
+    """Returns (month, how many) for each month with transactions matching `criteria`, newest first, by the day each
+    is listed on (SHOWN_DAY); see transaction_filter for the criteria."""
+    clause, params = transaction_filter(**criteria)
+    return [tuple(r) for r in conn.execute(
+        f"SELECT substr({SHOWN_DAY}, 1, 7) AS m, count(*) FROM {_LISTED} WHERE {clause} GROUP BY m ORDER BY m DESC", params)]
+
+
+def month_chunk(months: list[tuple[str, int]], newest: str, oldest: str | None = None) -> list[str]:
+    """Returns the months of `months` ((month, how many), newest first) to list together, newest first, from `newest`:
+    - through `oldest`, when it's given
+    - else as many as it takes to list PAGE_SIZE transactions or more"""
+    chunk, listed = [], 0
+    for m, n in months:
+        if m > newest or (oldest and m < oldest) or (not oldest and listed >= PAGE_SIZE):
+            continue
+        chunk.append(m)
+        listed += n
+    return chunk
+
+
+def by_month(days: list[dict]) -> list[dict]:
+    """Returns days from group_by_day, newest first, grouped as [{"month", "days"}]."""
+    months: list[dict] = []
+    for day in days:
+        if not months or months[-1]["month"] != day["date"][:7]:
+            months.append({"month": day["date"][:7], "days": []})
+        months[-1]["days"].append(day)
+    return months
 
 
 def find_transactions(conn, *, limit: int = PAGE_SIZE, offset: int = 0, **criteria) -> tuple[list[dict], int]:
@@ -1433,13 +1491,15 @@ def transaction_sums(conn, **criteria) -> dict:
     return {"out": round(row["money_out"], 2), "in": round(row["money_in"], 2)}
 
 
-def transaction_filter(*, month: str | None = None, account: int | None = None, category: str | None = None,
-                       type_: str | None = None, tag: int | None = None, amount: tuple | None = None, q: str | None = None,
-                       review: bool = False, hide_transfers: bool = False, linked_transfers: bool = False) -> tuple[str, list]:
+def transaction_filter(*, month: str | None = None, between: tuple[str, str] | None = None, account: int | None = None,
+                       category: str | None = None, type_: str | None = None, tag: int | None = None, amount: tuple | None = None,
+                       q: str | None = None, review: bool = False, hide_transfers: bool = False,
+                       linked_transfers: bool = False) -> tuple[str, list]:
     """Returns the SQL condition on transactions `t` (with `p` and `ot`, see _LISTED) for these criteria and its parameters.
     Category "none" means regular transactions waiting for a category: income and transfers don't take one, and
     excluded ones have none (db.py). A
-    payback goes by its purchase's month and category. `amount` is (lowest, highest) from amount_range, money in and
+    payback goes by its purchase's month and category. `month` and `between` (first day, day after the last) go by the
+    day a transaction is listed on (SHOWN_DAY). `amount` is (lowest, highest) from amount_range, money in and
     out alike. A transaction split into parts shows only on the review list (`review`), when the parts need a look:
     otherwise its parts show instead. `hide_transfers` leaves out moves between the user's accounts whose two sides
     are linked; `linked_transfers` keeps only those."""
@@ -1449,9 +1509,9 @@ def transaction_filter(*, month: str | None = None, account: int | None = None, 
     if tag:
         where.append("EXISTS (SELECT 1 FROM transaction_tags tt WHERE tt.transaction_id = t.id AND tt.tag_id = ?)")
         params.append(tag)
-    if month:
+    for start, end in ([reports.month_range(month)] if month else []) + ([between] if between else []):
         where.append(f"{SHOWN_DAY} >= ? AND {SHOWN_DAY} < ?")
-        params += reports.month_range(month)
+        params += [start, end]
     if account:
         where.append("t.account_id = ?")
         params.append(account)
@@ -1765,6 +1825,19 @@ def get_transaction(conn, tid: int):
     if t is None:
         raise HTTPException(404, "Transaction not found.")
     return t
+
+
+def rule_offer(conn, t, category_id: int | None) -> dict | None:
+    """Returns the offer, after transaction `t` was put in `category_id`, to always put transactions with its name
+    there: its id and name, the category's name, and how many others it would change; None without a category."""
+    if category_id is None:
+        return None
+    others = conn.execute(
+        "SELECT count(*) FROM transactions WHERE id != ? AND user_edited = 0 AND lower(trim(name)) = lower(trim(?)) "
+        "AND coalesce(category_id, -1) != ?",
+        (t["id"], t["name"], category_id),
+    ).fetchone()[0]
+    return {"id": t["id"], "name": t["name"], "category": category_name(conn, category_id), "others": others}
 
 
 def category_name(conn, category_id: int | None) -> str | None:

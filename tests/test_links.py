@@ -91,7 +91,7 @@ def test_linking_from_the_list_and_unlinking(client, settings):
     assert day.index(f'id="t{second}"') < day.index(f'id="t{first}"') < day.index("</section>")  # after the bigger one
     row_tag = lambda tid: day[day.rindex("<li", 0, day.index(f'id="t{tid}"')):day.index(f'id="t{tid}"')]
     assert "chain-down" in row_tag(second) and "chain-up" in row_tag(first) and "joined" not in row_tag(first)
-    assert "on Sep 1" in day[day.index(f'id="t{first}"'):day.index("</section>")] and "🔗 Linked" in day
+    assert "on Sep 1" in day[day.index(f'id="t{first}"'):day.index("</section>")] and '<span class="sr-only">Linked</span>' in day
     assert "<span>Tue, Sep 1</span>" not in september
     page_text = unescape(client.get(f"/transactions/{first}").text)
     assert "Linked with" in page_text and "Together" in page_text and "$115.30" in page_text
@@ -127,7 +127,7 @@ def test_a_linked_transaction_isnt_split_combined_or_paired(client, settings):
     payroll = conn.execute("SELECT id FROM transactions WHERE name = 'Acme Payroll'").fetchone()[0]
     with conn:
         links.link(conn, rows(conn, sam, payroll))
-    assert "Paying you back for a purchase?" not in unescape(client.get(f"/transactions/{sam}").text)
+    assert "Link the purchase it pays back" not in unescape(client.get(f"/transactions/{sam}").text)
     response = client.post(f"/transactions/{sam}/pays-back", data={"purchase_id": str(second), "back": "/transactions"})
     assert "is linked with other transactions. Unlink it first." in unescape(response.text)
     response = client.post(f"/transactions/{sam}/other-side", data={"other_id": str(second), "back": "/transactions"})

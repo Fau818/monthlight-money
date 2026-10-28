@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from html import unescape
@@ -7,7 +8,7 @@ from html import unescape
 from fastapi.testclient import TestClient
 
 from app import reports, sync
-from app.main import bank_details, create_app, find_transactions
+from app.main import bank_details, create_app, find_transactions, month_chunk
 from app.plaid_client import PlaidError
 from tests.conftest import COPILOT_CSV, FakePlaid, page, plaid_account, plaid_txn
 
@@ -323,7 +324,32 @@ def test_transactions_are_listed_by_day_with_emoji_categories(client, settings):
     assert "Mon, Sep 21" in listing and "Tue, Sep 8" in listing
     assert listing.index("Mon, Sep 21") < listing.index("Tue, Sep 8")  # newest first
     assert "🛒 Food › Groceries" in listing  # the category menu shows each category's emoji
+    assert re.search(r'<span class="pill tint-\w+">Groceries</span>', listing)  # and its pill, the category's own name
+    assert '<span class="cur">$</span>54.20' in listing  # amounts with a small dollar sign
     assert "$130.79 out · +$2,520.00 in" in listing  # totals of what's listed, paired transfers left out
+
+
+def test_months_are_listed_whole_a_few_at_a_time(monkeypatch):
+    monkeypatch.setattr("app.main.PAGE_SIZE", 10)
+    months = [("2026-10", 4), ("2026-09", 7), ("2026-08", 30), ("2026-07", 2)]
+    assert month_chunk(months, "2026-10") == ["2026-10", "2026-09"]  # enough to list 10 or more
+    assert month_chunk(months, "2026-08") == ["2026-08"]  # a month is never cut, however many it holds
+    assert month_chunk(months, "2026-10", "2026-08") == ["2026-10", "2026-09", "2026-08"]  # through the oldest asked for
+
+
+def test_the_list_goes_by_month_and_loads_earlier_ones(client, settings, monkeypatch):
+    import_sample(client, settings)
+    monkeypatch.setattr("app.main.PAGE_SIZE", 3)
+    listing = unescape(client.get("/transactions").text)
+    assert 'id="m2026-10"' in listing and 'id="m2026-09"' in listing and 'id="m2026-08"' not in listing
+    assert '<a class="button" href="/transactions?oldest=2026-07#m2026-08" data-older>August 2026 and earlier</a>' in listing
+    earlier = unescape(client.get("/transactions?oldest=2026-07").text)
+    assert all(f'id="m2026-{m}"' in earlier for m in ("10", "09", "08", "07")) and "data-older" not in earlier
+    # Each month starts with its totals, as on the dashboard; a search lists its months without them.
+    october = listing[listing.index('id="m2026-10"'):listing.index('id="m2026-09"')]
+    assert "<dt>Spent</dt><dd>$40.00</dd>" in october and 'href="/?month=2026-10">Open October' in october
+    found = unescape(client.get("/transactions?q=netflix").text)
+    assert 'id="m2026-09"' in found and "month-totals" not in found
 
 
 def test_dashboard_review_list_and_spending_chart(client, settings):
@@ -458,7 +484,7 @@ def test_a_friends_payback_links_to_the_purchase(client, settings):
     assert reports.month_totals(conn, "2026-10")["spent"] == 15.0  # Shell's 40, less the 25 that came in
 
     page_text = unescape(client.get(f"/transactions/{payback}").text)
-    assert "Paying you back for a purchase?" in page_text and f'value="{joes}">Sep 8 · Trader Joe\'s · $61.10' in page_text
+    assert "Link the purchase it pays back" in page_text and f'value="{joes}">Sep 8 · Trader Joe\'s · $61.10' in page_text
     response = client.post(f"/transactions/{payback}/pays-back", data={"purchase_id": str(joes), "back": f"/transactions/{payback}"})
     assert "pays back “Trader Joe's”: it counts in Groceries on Sep 8." in unescape(response.text)
     row = conn.execute("SELECT reimburses_id, type, user_edited, reviewed FROM transactions WHERE id = ?", (payback,)).fetchone()
@@ -481,7 +507,7 @@ def test_a_friends_payback_links_to_the_purchase(client, settings):
 
     september = unescape(client.get("/transactions?month=2026-09").text)
     assert september.index("Trader Joe's", september.index("Tue, Sep 8")) < september.index("Zelle from Sam")  # right under it
-    assert "↩ Pays back Trader Joe's" in september and "received Oct 2" in september and "↩ Your share $36.10" in september
+    assert "pays back Trader Joe's" in september and "received Oct 2" in september and "your share $36.10" in september
     assert "Zelle from Sam" not in client.get("/transactions?month=2026-10").text
     purchase_page = unescape(client.get(f"/transactions/{joes}").text)
     assert "Paid back" in purchase_page and "$36.10" in purchase_page
@@ -518,7 +544,7 @@ def test_a_payback_bigger_than_its_purchase_pays_it_back_in_full(client, setting
     # It's paid back in full, and the 5.00 over counts like a refund, so no total changes.
     assert reports.month_totals(conn, "2026-10") == before
     listing = unescape(client.get("/transactions?month=2026-10").text)
-    assert "↩ Paid back in full, $5.00 over" in listing and "Your share -$5.00" not in listing
+    assert "paid back in full, $5.00 over" in listing and "your share -$5.00" not in listing
     purchase_page = unescape(client.get(f"/transactions/{shell}").text)
     assert "$0.00</strong> · paid back in full" in purchase_page and "More than it cost" in purchase_page
     conn.close()
@@ -535,7 +561,7 @@ def test_the_other_side_of_a_move_can_be_linked_by_hand(client, settings):
     conn.execute("UPDATE transactions SET excluded = 1 WHERE id = ?", (out,))
     conn.commit()
     page_text = unescape(client.get(f"/transactions/{out}").text)
-    assert "A move between your accounts?" in page_text and f'value="{came_in}">Oct 4 · From my checking' in page_text
+    assert "Link the other side of a move" in page_text and f'value="{came_in}">Oct 4 · From my checking' in page_text
 
     response = client.post(f"/transactions/{out}/other-side", data={"other_id": str(came_in), "back": f"/transactions/{out}"})
     assert "as one move between your accounts" in unescape(response.text)
@@ -543,7 +569,7 @@ def test_the_other_side_of_a_move_can_be_linked_by_hand(client, settings):
     assert (rows[out]["transfer_id"], rows[came_in]["transfer_id"]) == (came_in, out)
     assert all(r["type"] == "transfer" and r["excluded"] == 0 and r["reviewed"] == 1 for r in rows.values())
     listing = unescape(client.get("/transactions?transfers=1").text)
-    assert "↔ To Chase Sapphire" in listing and "↔ From Acme Checking" in listing
+    assert "to Chase Sapphire" in listing and "from Acme Checking" in listing
     transfer_page = unescape(client.get(f"/transactions/{out}").text)
     assert "Other side" in transfer_page and "data-recurring-field hidden" in transfer_page and "data-category-field hidden" in transfer_page
 
@@ -589,7 +615,7 @@ def test_transactions_can_be_found_by_amount(client, settings):
     conn = sync.connect(settings.db_path)
     shell = conn.execute("SELECT id FROM transactions WHERE name = 'Shell'").fetchone()[0]
     conn.close()
-    assert 'href="/transactions?amount=40.00">Others with this amount' in client.get(f"/transactions/{shell}").text
+    assert 'href="/transactions?amount=40.00">Find others with this amount' in client.get(f"/transactions/{shell}").text
 
 
 def test_selected_transactions_change_together(client, settings):
@@ -686,6 +712,27 @@ def test_accounts_can_be_added_archived_or_hidden_and_the_picker_follows(client,
     assert reports.month_totals(conn, "2026-09")["income"] == before["income"]  # the archived account's paycheck still counts
     accounts_page = unescape(client.get("/accounts").text)
     assert "Archived (1)" in accounts_page and accounts_page.index("Archived (1)") < accounts_page.index("Acme Checking", accounts_page.index("Archived (1)"))
+    conn.close()
+
+
+def test_a_transactions_fields_save_quietly_as_they_change(client, settings):
+    import_sample(client, settings)
+    conn = sync.connect(settings.db_path)
+    shell = conn.execute("SELECT * FROM transactions WHERE name = 'Shell'").fetchone()
+    gas, shopping = (conn.execute("SELECT id FROM categories WHERE name = ?", (n,)).fetchone()[0] for n in ("Gas", "Shopping"))
+    here = f"/transactions/{shell['id']}?back=%2Ftransactions"
+    form = {"name": "Shell", "date": shell["date"], "type": "regular", "category_id": str(gas), "reviewed": "1", "notes": "Road trip",
+            "tags_shown": "1", "new_tags": "Trip, Work", "back": here, "quiet": "1"}
+    # Saved as it changes (app.js sends quiet), with no message: the pane shows what changed.
+    page_text = unescape(client.post(f"/transactions/{shell['id']}", data=form).text)
+    assert "data-toast" not in page_text and ">Road trip</textarea>" in page_text and "Regular transaction" in page_text
+    trip, work = (conn.execute("SELECT id FROM tags WHERE name = ?", (n,)).fetchone()[0] for n in ("Trip", "Work"))
+    assert page_text.count('<label class="tag-chip ') == 2
+    # Taking a tag off leaves it to add again, among the others; a new category offers a rule for the name.
+    page_text = unescape(client.post(f"/transactions/{shell['id']}", data={**form, "new_tags": "", "tag_ids": [str(trip)], "category_id": str(shopping)}).text)
+    assert page_text.count('<label class="tag-chip ') == 1 and '<option value="Work">' in page_text
+    assert "“Shell” is now Shopping." in page_text and "Always put “Shell” in Shopping" in page_text
+    assert work and "Make a rule for this name" in page_text
     conn.close()
 
 

@@ -39,10 +39,10 @@ def test_a_purchase_splits_into_parts_that_count_instead(client, settings):
     # The list shows a row for the split, and its parts under it, side by side.
     september = unescape(client.get("/transactions?month=2026-09").text)
     head, first, second = (september.index(f'id="{i}"') for i in (f"split{joes}", f't{parts[0]["id"]}', f't{parts[1]["id"]}'))
-    assert f'id="t{joes}"' not in september and head < first < second and "Split into 2" in september
+    assert f'id="t{joes}"' not in september and head < first < second and "split into 2" in september
     rows = lambda i: september[september.rindex("<li", 0, i):i]
     assert "joined" in rows(first) and "joined" in rows(second) and "✂ Split</a>" not in september
-    assert 'Tue, Sep 8</span><span class="muted">$61.10' in september
+    assert 'Tue, Sep 8</span><span>$61.10' in september
     # Filtering by a category shows only the part in it.
     flowers = unescape(client.get(f"/transactions?month=2026-09&category={shopping}").text)
     assert f'id="t{parts[1]["id"]}"' in flowers and f'id="split{joes}"' in flowers and f'id="t{parts[0]["id"]}"' not in flowers
@@ -156,7 +156,7 @@ def test_a_split_that_no_longer_adds_up_shows_on_the_review_list(client, setting
     with conn:
         conn.execute("UPDATE transactions SET amount = -70, reviewed = 0 WHERE id = ?", (joes,))  # as a bank update leaves it
     review = unescape(client.get("/transactions?review=1").text)
-    assert f'id="t{joes}"' in review and "✂ In 2 parts" in review and "Parts add up to $61.10" in review
+    assert f'id="t{joes}"' in review and '<span class="mark-text">2 parts</span>' in review and "Parts add up to $61.10" in review
     assert "but the parts add up to $61.10" in unescape(client.get(f"/transactions/{joes}").text)
     listing = unescape(client.get("/transactions").text)
     assert f'id="t{joes}"' not in listing and "Split doesn't add up" in listing
@@ -325,7 +325,7 @@ def test_rows_split_in_copilot_combine_into_one_line_and_ungroup(client, setting
     assert (reports.month_totals(conn, "2026-09"), reports.category_spending(conn, "2026-09")) == before  # nothing's total changes
     listing = unescape(client.get("/transactions?month=2026-09").text)
     assert all(f'id="t{i}"' in listing for i in (mug, pens, tape)) and f'id="t{combined["id"]}"' not in listing
-    assert f'id="split{combined["id"]}"' in listing and "Split into 3" in listing  # the combined row heads its items
+    assert f'id="split{combined["id"]}"' in listing and "split into 3" in listing  # the combined row heads its items
     assert "Bank row" in listing
 
     # A bank row can't be combined; Ungroup puts the rows back as they were.

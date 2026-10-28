@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import transaction_row, split_head, review_all, icon with context %}
+{% from "_macros.html" import transaction_row, split_head, review_all, left_text, icon with context %}
 {% block title %}Transactions{% endblock %}
 {% block content %}
 <div class="page-head">
@@ -15,7 +15,7 @@
   <div class="filters">
     <select name="month" data-autosubmit aria-label="Month" class="chip-select{% if filters.month %} on{% endif %}">
       <option value="">All months</option>
-      {% for m in months %}<option value="{{ m }}"{% if filters.month == m %} selected{% endif %}>{{ m|month_label }}</option>{% endfor %}
+      {% for m in month_options %}<option value="{{ m }}"{% if filters.month == m %} selected{% endif %}>{{ m|month_label }}</option>{% endfor %}
     </select>
     <select name="account" data-autosubmit aria-label="Account" class="chip-select{% if filters.account %} on{% endif %}">
       <option value="">All accounts</option>
@@ -51,7 +51,7 @@
 
 <div class="list-summary">
   {% if amount_unreadable %}<span class="over-text">Couldn't read “{{ filters.amount }}” as an amount: try 12.50, 10-20, &gt;100 or &lt;50.</span>{% endif %}
-  <span>{{ plural(total, "transaction") }}{% if total %} · {{ sums.out|money }} out · {{ sums["in"]|amount }} in{% endif %}{% if pages > 1 %} · page {{ page }} of {{ pages }}{% endif %}</span>
+  <span>{{ plural(total, "transaction") }}{% if total %} · {{ sums.out|money }} out · {{ sums["in"]|amount }} in{% endif %}</span>
   {% if hidden_transfers %}<span>{{ hidden_transfers }} paired transfer{{ "" if hidden_transfers == 1 else "s" }} between your accounts hidden · <a href="{{ show_transfers_link }}">Show</a></span>
   {% elif filters.transfers %}<span><a href="{{ hide_transfers_link }}">Hide transfers</a></span>{% endif %}
   {% set tag = tag_looks.get(filters.tag|int) if filters.tag else none %}
@@ -66,12 +66,34 @@
   {{ review_all(rows, here) }}
 </div>
 
-{% if groups %}
-  <div class="card list-card{% if selecting %} selecting{% endif %}">
-    {% for g in groups %}
-      <section class="day">
-        <h2 class="day-head"><span>{{ g.label }}</span>{% if g.spent > 0 %}<span class="muted">{{ g.spent|money }}</span>{% endif %}</h2>
-        <ul class="txns">{% for t in g.rows %}{% if t.kind == "split" %}{{ split_head(t, here, selecting) }}{% else %}{{ transaction_row(t, here, categories, selecting) }}{% endif %}{% endfor %}</ul>
+{% if months %}
+  {# A card for each month: its totals, as on the dashboard, when the whole month is listed, then its days. #}
+  <div class="months{% if selecting %} selecting{% endif %}">
+    {% for m in months %}
+      <section class="card list-card month" id="m{{ m.month }}">
+        <header class="month-head">
+          <h2>{{ m.month|month_label }}</h2>
+          {% if m.totals %}
+            <dl class="month-totals">
+              <div><dt>Income</dt><dd{% if m.totals.income > 0 %} class="money-in"{% endif %}>{{ m.totals.income|amount_html }}</dd></div>
+              <div><dt>Spent</dt><dd>{{ m.totals.spent|money }}</dd></div>
+              {% if m.budget %}
+                {% set over = m.totals.spent > m.budget %}
+                <div><dt>{{ "Over budget" if over else ("Left to spend" if m.current else "Under budget") }}</dt>
+                  <dd class="{{ 'over-text' if over else '' }}">{% if over %}⚠ {% endif %}{{ (m.totals.spent - m.budget)|abs|money }}</dd></div>
+              {% else %}
+                <div><dt>Income minus spending</dt><dd>{{ m.totals.net|money }}</dd></div>
+              {% endif %}
+            </dl>
+            <a class="month-link" href="/?month={{ m.month }}">Open {{ m.month|month_name }} {{ icon("right") }}</a>
+          {% endif %}
+        </header>
+        {% for g in m.days %}
+          <section class="day">
+            <h3 class="day-head"><span>{{ g.label }}</span>{% if g.spent > 0 %}<span>{{ g.spent|money }}</span>{% endif %}</h3>
+            <ul class="txns">{% for t in g.rows %}{% if t.kind == "split" %}{{ split_head(t, here, selecting) }}{% else %}{{ transaction_row(t, here, categories, selecting) }}{% endif %}{% endfor %}</ul>
+          </section>
+        {% endfor %}
       </section>
     {% endfor %}
   </div>
@@ -107,12 +129,8 @@
       </div>
     </form>
   {% endif %}
-  {% if pages > 1 %}
-    <div class="pager">
-      {% if page > 1 %}<a class="button" href="/transactions?{{ query }}&page={{ page - 1 }}">{{ icon("left") }} Newer</a>{% endif %}
-      {% if page < pages %}<a class="button" href="/transactions?{{ query }}&page={{ page + 1 }}">Older {{ icon("right") }}</a>{% endif %}
-    </div>
-  {% endif %}
+  {# Loaded as the list scrolls near it (app.js); without JavaScript, a link to the list with them. #}
+  {% if older %}<p class="older"><a class="button" href="{{ older }}" data-older>{{ older_month|month_label }} and earlier</a></p>{% endif %}
 {% else %}
   <div class="card"><p class="empty">No transactions match.</p></div>
 {% endif %}
