@@ -1,0 +1,99 @@
+{% from "_macros.html" import icon -%}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>{% block title %}Monthlight{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css?v={{ static_version }}">
+  <script>document.documentElement.classList.add("js")</script>
+</head>
+<body>
+  {% macro nav_link(href, label, name, cls="") -%}
+    {% set path = request.url.path %}
+    {% set active = path == href or (href != "/" and path.startswith(href)) %}
+    <a href="{{ href }}" class="{{ cls }}{% if active %} active{% endif %}"{% if active %} aria-current="page"{% endif %}>
+      {{ icon(name) }}<span>{{ label }}</span>
+      {%- if href == "/transactions" and review_count %}<b class="count" title="{{ plural(review_count, 'transaction') }} to review">{{ review_count }}</b>{% endif -%}
+    </a>
+  {%- endmacro %}
+
+  <aside class="sidebar">
+    <a class="brand" href="/"><span class="logo" aria-hidden="true">$</span>Monthlight</a>
+    <nav aria-label="Main">
+      {% for href, label, name in nav %}{{ nav_link(href, label, name) }}{% endfor %}
+    </nav>
+    <nav class="secondary" aria-label="More">
+      {% for href, label, name in more_nav %}{{ nav_link(href, label, name) }}{% endfor %}
+    </nav>
+    {% if settings.plaid_configured %}
+      <form method="post" action="/sync" class="sync">
+        <input type="hidden" name="back" value="{{ here }}">
+        <button type="submit" data-busy="Syncing…">{{ icon("sync") }} Sync now</button>
+        <span class="muted small">{% if last_synced %}Updated {{ last_synced|ago }}{% else %}Not synced yet{% endif %}</span>
+      </form>
+    {% endif %}
+  </aside>
+
+  <header class="topbar">
+    <a class="brand" href="/"><span class="logo" aria-hidden="true">$</span>Monthlight</a>
+    {% if settings.plaid_configured %}
+      <form method="post" action="/sync" class="sync">
+        <input type="hidden" name="back" value="{{ here }}">
+        <button type="submit" class="icon-btn" data-busy="…" title="Sync now{% if last_synced %} (updated {{ last_synced|ago }}){% endif %}" aria-label="Sync now">{{ icon("sync") }}</button>
+      </form>
+    {% endif %}
+    <details class="more-menu">
+      <summary class="icon-btn" aria-label="More pages">{{ icon("more") }}</summary>
+      <div class="menu">{% for href, label, name in more_nav %}{{ nav_link(href, label, name) }}{% endfor %}</div>
+    </details>
+  </header>
+
+  <main>
+    {% if settings.plaid_configured and settings.plaid_env == "sandbox" %}
+      <p class="notice">Test mode: connected banks are Plaid's fake Sandbox banks. Set <code>PLAID_ENV=production</code> in <code>.env</code> to use your real banks.</p>
+    {% endif %}
+    {% for p in problems %}
+      <div class="alert">
+        {% if p.env != settings.plaid_env %}
+          {{ p.institution_name or "A bank" }} was connected in {{ p.env }} mode, so it won't sync in {{ settings.plaid_env }} mode. You can remove it on <a href="/accounts">Accounts</a>.
+        {% elif p.status == "needs_match" %}
+          {{ p.institution_name or "A bank" }} is connected, but its accounts still need matching. <a href="/plaid/match/{{ p.item_id }}">Match accounts</a>
+        {% elif p.status == "login_required" %}
+          {{ p.institution_name or "A bank" }} needs you to log in again. Fix it on <a href="/accounts">Accounts</a>.
+        {% elif p.status == "ok" %}
+          {{ p.institution_name or "A bank" }} stops sharing data with this app on {{ p.consent_expires_at[:10] }} unless you approve it again. Use <strong>Log in again</strong> on <a href="/accounts">Accounts</a> before then.
+        {% else %}
+          Syncing {{ p.institution_name or "a bank" }} failed: {{ p.error }}
+        {% endif %}
+      </div>
+    {% endfor %}
+    {% block content %}{% endblock %}
+    {% if flash %}
+      <div class="toast" role="status" data-toast{% if flash.rule_offer %} data-sticky{% endif %}>
+        <span>{{ flash.message }}</span>
+        {% if flash.rule_offer %}
+          <form method="post" action="/rules/from-transaction/{{ flash.rule_offer.id }}" class="inline" data-swap>
+            <input type="hidden" name="back" value="{{ here }}">
+            <button type="submit">Always put “{{ flash.rule_offer.name }}” in {{ flash.rule_offer.category }}{% if flash.rule_offer.others %} and update {{ flash.rule_offer.others }} more{% endif %}</button>
+          </form>
+        {% endif %}
+        <button type="button" class="icon-btn" data-toast-close aria-label="Dismiss">{{ icon("close") }}</button>
+      </div>
+    {% endif %}
+  </main>
+
+  {# Transactions open here, over the page (app.js); without JavaScript their links open their own page. #}
+  <dialog class="drawer" data-drawer aria-label="Transaction">
+    <button type="button" class="icon-btn drawer-close" data-close aria-label="Close">{{ icon("close") }}</button>
+    <div class="drawer-body"></div>
+  </dialog>
+
+  <nav class="tabbar" aria-label="Main">
+    {% for href, label, name in nav %}{{ nav_link(href, label, name) }}{% endfor %}
+  </nav>
+  <script src="/static/app.js?v={{ static_version }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

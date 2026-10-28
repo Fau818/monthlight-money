@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Preview import{% endblock %}
+{% block content %}
+<p><a class="back" href="/import">‹ Import</a></p>
+<div class="page-head"><h1>Preview: {{ file }}</h1></div>
+
+<section class="card">
+  <table class="compact">
+    <tr><td>Transactions</td><td>{{ s.posted }} to import{% if s.pending %}, plus {{ s.pending }} pending that are left for your bank connection to bring in once they post{% endif %}</td></tr>
+    <tr><td>Dates</td><td>{{ s.start }} to {{ s.end }}</td></tr>
+    <tr><td>Categories</td><td>{{ s.categories }}</td></tr>
+    <tr><td>Recurring charges</td><td>{{ s.recurring }}</td></tr>
+    {% if s.unreadable %}<tr><td>Unreadable lines</td><td class="over-text">{{ s.unreadable }} skipped (no valid date or amount)</td></tr>{% endif %}
+    <tr><td>Amounts</td><td>In this file, spending is written as {{ "positive" if s.spending_positive else "negative" }} numbers. The app stores spending as negative and shows it without a sign.</td></tr>
+  </table>
+</section>
+
+<section class="card">
+  <h2>Accounts ({{ s.accounts|length }})</h2>
+  <table class="compact">
+    {% for a in s.accounts %}<tr><td>{{ a.name }}{% if a.mask %} ••{{ a.mask }}{% endif %}</td><td class="num">{{ a.count }} transactions</td></tr>{% endfor %}
+  </table>
+</section>
+
+<section class="card">
+  <h2>Columns found</h2>
+  <p class="muted">{% for k, v in s.columns.items() %}{{ v }}{% if not loop.last %}, {% endif %}{% endfor %}</p>
+  {% if s.missing_columns %}<p class="muted">Not in this file: {{ s.missing_columns|join(", ") }}</p>{% endif %}
+</section>
+
+<form method="post" action="/import/copilot" class="card stack">
+  <input type="hidden" name="file" value="{{ file }}">
+  <label class="check"><input type="checkbox" name="flip" value="1"> The signs look backwards. Flip them.</label>
+  <div><button type="submit" class="primary" data-busy="Importing…">Import {{ s.posted }} transactions</button></div>
+</form>
+{% endblock %}

@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% from "_macros.html" import category_select, icon %}
+{% block title %}Add a transaction{% endblock %}
+{% block content %}
+<p><a class="back" href="{{ values.back }}">{{ icon("left") }} Back</a></p>
+<div class="sheet">
+  <h1>Add a transaction</h1>
+  <p class="muted">Transactions from connected banks and cards arrive on their own. Add only what no bank sends, such as cash or an account that isn't connected: a copy of a bank's transaction would count twice.</p>
+  {% if error %}<div class="alert">{{ error }}</div>{% endif %}
+
+  <form method="post" action="/transactions/new" class="card form-list">
+    <input type="hidden" name="back" value="{{ values.back }}">
+    <fieldset class="field">
+      <legend>Money</legend>
+      <div class="segmented">
+        <label><input type="radio" name="direction" value="out"{% if values.direction != "in" %} checked{% endif %}><span>Out (spending)</span></label>
+        <label><input type="radio" name="direction" value="in"{% if values.direction == "in" %} checked{% endif %}><span>In (refund or income)</span></label>
+      </div>
+    </fieldset>
+    <label class="field">Amount <input name="amount" value="{{ values.amount or '' }}" inputmode="decimal" required placeholder="12.50" class="big-input"></label>
+    <label class="field">Name <input name="name" value="{{ values.name or '' }}" required placeholder="For example, Farmers market"></label>
+    <label class="field">Date <input type="date" name="date" value="{{ values.date }}" required></label>
+    <label class="field">Account
+      <select name="account">
+        <option value="cash"{% if values.account == "cash" %} selected{% endif %}>Cash{% if not has_cash %} (a new account){% endif %}</option>
+        {% for a in accounts %}
+          <option value="{{ a.id }}"{% if values.account == a.id|string %} selected{% endif %}>{{ a.name }}{% if a.mask %} ••{{ a.mask }}{% endif %}{% if a.connected %} (connected: the bank sends its own){% endif %}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <fieldset class="field">
+      <legend>Type</legend>
+      <div class="segmented">
+        {% for value, label in [("regular", "Regular"), ("income", "Income"), ("transfer", "Transfer")] %}
+          <label><input type="radio" name="type" value="{{ value }}" data-type-select{% if values.type == value %} checked{% endif %}><span>{{ label }}</span></label>
+        {% endfor %}
+      </div>
+    </fieldset>
+    <label class="field" data-category-field{% if values.type != "regular" %} hidden{% endif %}>Category {{ category_select("category_id", categories, values.category_id) }}</label>
+    <label class="field">Notes <textarea name="notes" rows="2">{{ values.notes or "" }}</textarea></label>
+    <div class="form-actions"><button type="submit" class="primary">Add</button><a class="button" href="{{ values.back }}">Cancel</a></div>
+  </form>
+</div>
+{% endblock %}

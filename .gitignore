@@ -1,0 +1,11 @@
+# Keys and financial data
+.env
+data/
+import/
+backups/
+docker-compose.override.yml
+demo/
+
+.venv/
+__pycache__/
+.pytest_cache/

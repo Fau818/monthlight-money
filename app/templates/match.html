@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Match accounts{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Match accounts from {{ item.institution_name or "your bank" }}</h1></div>
+<p>You already have accounts here, for example from your Copilot import. For each account the bank sent, pick the one it is, so its history continues instead of being duplicated. Pick <strong>New account</strong> if it's not one of them.</p>
+
+<form method="post" action="/plaid/match/{{ item.item_id }}" class="card stack">
+  {% for p in pairs %}
+    <label>
+      <strong>{{ p.plaid.name }}</strong>{% if p.plaid.mask %} ••{{ p.plaid.mask }}{% endif %}
+      <span class="muted">({{ p.plaid.subtype or p.plaid.type }})</span>
+      <select name="account_{{ p.plaid.account_id }}">
+        <option value="">New account</option>
+        {% for e in existing %}
+          <option value="{{ e.id }}"{% if e.id == p.suggested %} selected{% endif %}>
+            {{ e.name }}{% if e.mask %} ••{{ e.mask }}{% endif %} — {{ e.count }} transactions{% if e.first %}, {{ e.first }} to {{ e.last }}{% endif %}
+          </option>
+        {% endfor %}
+      </select>
+    </label>
+  {% endfor %}
+  <div><button type="submit" class="primary">Save and start syncing</button></div>
+</form>
+{% endblock %}

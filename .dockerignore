@@ -1,0 +1,7 @@
+# Only what the image needs goes into the build, never keys, data or backups.
+*
+!pyproject.toml
+!uv.lock
+!app
+**/__pycache__
+**/*.pyc

@@ -1,0 +1,15 @@
+name: monthlight
+services:
+  monthlight:
+    build: .
+    image: monthlight:latest
+    pull_policy: never  # NOTE: built here; without this, Compose first tries Docker Hub and prints an error
+    container_name: monthlight
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"  # this computer only: the app has no login
+    env_file: .env
+    volumes:
+      - ./data:/data
+      - ./import:/import
+      - ./backups:/backups

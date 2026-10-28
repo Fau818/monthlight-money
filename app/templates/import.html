@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Import{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Import from Copilot</h1></div>
+
+{% if imported %}
+  <p class="notice">Copilot history last imported {{ imported|ago }}. Importing the same file again is safe; rows already here are skipped.</p>
+{% elif connected %}
+  <p class="alert">You've already connected a bank. Import your Copilot history now and then match accounts when asked, or the two could overlap.</p>
+{% endif %}
+
+<ol>
+  <li>In Copilot on iPhone, go to <strong>Settings → Account</strong> and export your transactions. On Mac or the web, clear every filter on the Transactions tab first, because there it exports only what's showing.</li>
+  <li>Put the file in the project's <code>import</code> folder, or upload it below.</li>
+  <li>Check the preview, then import. Do this <strong>before</strong> connecting your banks.</li>
+</ol>
+
+<section class="card">
+  <h2>Files in the import folder</h2>
+  {% if files %}
+    <table class="compact">
+      {% for f in files %}
+        <tr><td>{{ f }}</td><td><a class="button" href="/import/preview?file={{ f|urlencode }}">Preview</a></td></tr>
+      {% endfor %}
+    </table>
+  {% else %}
+    <p class="muted">No .csv files there yet.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Or upload it</h2>
+  <form method="post" action="/import/upload" enctype="multipart/form-data" class="filters">
+    <input type="file" name="upload" accept=".csv,text/csv" required>
+    <button type="submit">Upload and preview</button>
+  </form>
+</section>
+{% endblock %}

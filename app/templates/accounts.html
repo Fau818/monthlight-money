@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% from "_macros.html" import line_chart, meter, icon with context %}
+{% block title %}Accounts{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Accounts</h1></div>
+
+<section class="card">
+  <div class="spend-head">
+    <div>
+      <div class="label">Net worth</div>
+      {% set dollars, cents = worth.net|money_parts %}
+      <div class="hero">{{ dollars }}<span class="cents">{{ cents }}</span></div>
+    </div>
+    <dl class="kpis">
+      <div><dt>Assets</dt><dd>{{ worth.assets|money }}</dd></div>
+      <div><dt>Owed</dt><dd>{{ worth.liabilities|money }}</dd></div>
+    </dl>
+  </div>
+  {% if worth_chart %}
+    {{ line_chart(worth_chart, "Net worth over time", height=160) }}
+  {% else %}
+    <p class="muted small">A chart of your net worth fills in as your banks sync, day by day.</p>
+  {% endif %}
+</section>
+
+{# One account: open it to rename, hide or archive it. #}
+{% macro account_row(a) %}
+  <li{% if a.hidden or a.archived %} class="inactive"{% endif %}>
+    <details class="expand">
+      <summary class="acct-row" title="Rename, hide or archive {{ a.name }}">
+        <span class="acct-icon" aria-hidden="true">{{ (a.institution or a.name)[:1]|upper }}</span>
+        <span class="acct-main">
+          <span class="acct-name"><strong>{{ a.name }}</strong>{% if a.hidden %}<span class="badge">Hidden</span>{% endif %}{% if a.archived %}<span class="badge">Archived</span>{% endif %}</span>
+          <span class="muted small">
+            {{- a.institution or "" }}{% if a.mask %} ••{{ a.mask }}{% endif %}{% if a.institution or a.mask %} · {% endif %}
+            {%- if a.plaid_account_id %}updated {{ a.balance_updated_at|ago }}{% elif a.kept_by_hand %}what's left after its transactions{% else %}not connected to a bank{% endif %}
+          </span>
+        </span>
+        <span class="num">{{ a.balance|money }}</span>{#- as the bank shows it: what's owed on a card, positive #}
+        <span class="chev">{{ icon("right") }}</span>
+      </summary>
+      <div class="expand-body">
+        <form method="post" action="/accounts/{{ a.id }}" class="inline-edit">
+          <input name="name" value="{{ a.name }}" aria-label="Account name">
+          <label class="check small"><input type="checkbox" name="hidden" value="1"{% if a.hidden %} checked{% endif %}> Hide (leave out of totals)</label>
+          <label class="check small"><input type="checkbox" name="archived" value="1"{% if a.archived %} checked{% endif %}> Archive (no longer used: still counted, but not offered for new transactions)</label>
+          <button type="submit">Save</button>
+        </form>
+      </div>
+    </details>
+    {% if a.type == "credit" and a.credit_limit and a.balance is not none %}
+      <div class="utilization">
+        {{ meter(a.balance, a.credit_limit, "blue") }}
+        <span class="muted small">{{ percent(a.balance, a.credit_limit) }}% of the {{ a.credit_limit|money }} limit used</span>
+      </div>
+    {% endif %}
+  </li>
+{% endmacro %}
+
+{% for g in worth.groups %}
+  {% set shown = g.accounts|rejectattr("archived")|list %}
+  {% if shown %}
+    <section class="card">
+      <div class="card-head"><h2>{{ g.label }}</h2><strong class="num">{{ g.balance|money }}</strong></div>
+      <ul class="acct-list">{% for a in shown %}{{ account_row(a) }}{% endfor %}</ul>
+    </section>
+  {% endif %}
+{% else %}
+  <section class="card"><p class="empty">No accounts yet.</p></section>
+{% endfor %}
+
+{% set archived = worth.groups|map(attribute="accounts")|sum(start=[])|selectattr("archived")|list %}
+{% if archived %}
+  <details class="card fold">
+    <summary><h2>Archived ({{ archived|length }})</h2></summary>
+    <p class="muted small">Accounts you no longer use. Their history still counts; they're just not offered when you add a transaction.</p>
+    <ul class="acct-list">{% for a in archived %}{{ account_row(a) }}{% endfor %}</ul>
+  </details>
+{% endif %}
+
+<section class="card">
+  <h2>Add an account</h2>
+  <p class="muted small">For money no bank sends transactions for, like a gift card balance or cash. Pick it when you add a transaction; it shows what's left on it after them.</p>
+  <form method="post" action="/accounts/new" class="inline-edit">
+    <input name="name" placeholder="For example, Amazon balance" required aria-label="Account name">
+    <button type="submit">Add</button>
+  </form>
+</section>
+
+<section class="card">
+  <h2>Bank connections</h2>
+  {% if not imported %}
+    <p class="notice">If you have a Copilot export, <a href="/import">import it</a> <strong>before</strong> connecting your banks, so your history and new transactions line up without duplicates.</p>
+  {% endif %}
+
+  {% if items %}
+    <ul class="conn-list">
+      {% for i in items %}
+        {% set expiring = i.consent_expires_at and i.consent_expires_at < consent_cutoff %}
+        <li>
+          <div class="conn-main">
+            <strong>{{ i.institution_name or "Bank" }}</strong>{% if i.env != "production" %} <span class="badge">{{ i.env }}</span>{% endif %}
+            {% if i.status == "ok" %}<span class="status ok">● Connected</span>{% if i.update_status and i.update_status != "HISTORICAL_UPDATE_COMPLETE" %} <span class="muted small">still loading history</span>{% endif %}
+            {% elif i.status == "needs_match" %}<span class="status warn">● <a href="/plaid/match/{{ i.item_id }}">Match accounts</a></span>
+            {% elif i.status == "login_required" %}<span class="status bad">● Needs login</span>
+            {% else %}<span class="status bad">● Error</span>{% endif %}
+            <div class="muted small">
+              Last checked {{ i.last_synced_at|ago }}
+              {% if i.consent_expires_at %} · {% if expiring %}<strong>Bank access expires {{ i.consent_expires_at[:10] }}</strong>{% else %}Bank access expires {{ i.consent_expires_at[:10] }}{% endif %}{% endif %}
+            </div>
+            {% if i.error and i.status != "ok" %}<div class="muted small">{{ i.error }}</div>{% endif %}
+          </div>
+          <div class="conn-actions">
+            {% if i.env == settings.plaid_env and settings.plaid_configured %}
+              {% if i.status == "login_required" or (i.status == "ok" and expiring) %}<button type="button" class="primary" data-plaid-link data-item-id="{{ i.item_id }}">Log in again</button>
+              {% elif i.status == "ok" %}<button type="button" class="link" data-plaid-link data-item-id="{{ i.item_id }}" title="Log in to the bank again and pick which accounts it shares. Doesn't use a new slot.">Add or remove accounts</button>{% endif %}
+            {% endif %}
+            <details class="inline-details">
+              <summary>Remove</summary>
+              <form method="post" action="/plaid/items/{{ i.item_id }}/remove" data-confirm="Disconnect {{ i.institution_name or 'this bank' }}? Plaid's free plan doesn't give back the connection slot.">
+                <label class="check small"><input type="checkbox" name="delete_data" value="1"{% if i.env == "sandbox" %} checked{% endif %}> Also delete transactions that came from this connection</label>
+                <button type="submit" class="danger">Disconnect</button>
+              </form>
+            </details>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  {% if settings.plaid_configured %}
+    {% set connected = items|selectattr("env", "equalto", settings.plaid_env)|map(attribute="institution_name")|select|join(", ") %}
+    <p class="connect"><button type="button" class="primary" data-plaid-link
+      {%- if settings.plaid_env == "production" and connected %} data-confirm="Connect another bank? Already connected: {{ connected }}. Each new connection uses one of your 10 free Plaid slots for good. If one of those banks stopped working, choose Cancel and use Log in again instead, or Add or remove accounts to add an account you left out."{% endif %}>Connect a bank</button>
+    <span class="muted">Opens Plaid's secure window, where you log in to your bank.{% if settings.plaid_env == "production" %} Each new connection uses one of your 10 free slots, for good.{% endif %}</span></p>
+  {% else %}
+    <p class="notice">To connect banks, put your Plaid keys in the <code>.env</code> file in the project folder, then restart the app (<code>docker compose up -d</code>).</p>
+  {% endif %}
+</section>
+{% endblock %}
+{% block scripts %}
+  {% if settings.plaid_configured %}<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>{% endif %}
+{% endblock %}

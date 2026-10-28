@@ -1,0 +1,36 @@
+[project]
+name = "monthlight"
+version = "0.1.0"
+description = "A self-hosted personal finance app: bank sync through Plaid, budgets, and a Copilot Money import"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "jinja2>=3.1",
+    "httpx>=0.27",
+    "python-multipart>=0.0.9",
+]
+
+[project.urls]
+Repository = "https://github.com/Fau818/monthlight-money"
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+# Starlette's test client asks for httpx2; the app pins its versions, so the notice waits for an upgrade.
+filterwarnings = ["ignore:Using .httpx. with .starlette.testclient. is deprecated"]
+
+[tool.ruff]
+line-length = 120  # NOTE: the code's lines run long; at ruff's default of 88, import sorting would wrap most imports
+
+[tool.ruff.lint.flake8-bugbear]
+# NOTE: FastAPI declares form fields and dependencies as default values, which B008 would flag
+extend-immutable-calls = ["fastapi.Body", "fastapi.Depends", "fastapi.File", "fastapi.Form"]

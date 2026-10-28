@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% from "_macros.html" import month_nav, meter, left_text, badge, line_chart, transaction_row, review_all, icon with context %}
+{% block content %}
+{{ month_nav("/", month, prev_month, next_month, this_month) }}
+
+{% if not has_data %}
+  <section class="card">
+    <h2>Getting started</h2>
+    <ol>
+      <li><strong>Bring in your Copilot history:</strong> put your Copilot export in the <code>import</code> folder, or upload it on the <a href="/import">Import</a> page.</li>
+      <li><strong>Connect your banks:</strong> add your Plaid keys to <code>.env</code>, then use <a href="/accounts">Accounts</a> → Connect a bank.</li>
+    </ol>
+  </section>
+{% endif %}
+
+<div class="dash">
+  <div class="dash-main">
+    <section class="card spend">
+      <div class="spend-head">
+        <div>
+          <div class="label">Spent in {{ month|month_name }}</div>
+          {% set dollars, cents = totals.spent|money_parts %}
+          <div class="hero">{{ dollars }}<span class="cents">{{ cents }}</span></div>
+          <div class="spend-sub">
+            {% if budget %}<span>{{ left_text(totals.spent, budget, "your " ~ budget|money ~ " budget") }}</span>{% endif %}
+            {% if pace.this and pace.last|length and pace.last[-1] %}
+              {% set diff = pace.this[-1] - pace.last_same_day %}
+              {% set by = " by this point" if month == this_month else "" %}
+              {% if diff < 0 %}<span class="good-text">↓ {{ (-diff)|money }} less than {{ prev_month|month_name }}{{ by }}</span>
+              {% elif diff > 0 %}<span class="over-text">↑ {{ diff|money }} more than {{ prev_month|month_name }}{{ by }}</span>
+              {% else %}<span>Same as {{ prev_month|month_name }}{{ by }}</span>{% endif %}
+            {% endif %}
+          </div>
+        </div>
+        <dl class="kpis">
+          <div><dt>Income</dt><dd class="money-in">{{ totals.income|amount }}</dd></div>
+          <div><dt>Income minus spending</dt><dd class="{% if totals.net > 0 %}money-in{% elif totals.net < 0 %}over-text{% endif %}">{{ totals.net|money }}</dd></div>
+        </dl>
+      </div>
+      {% if pace_chart %}
+        {{ line_chart(pace_chart, "Spending added up day by day, " ~ (month|month_name) ~ " compared with " ~ (prev_month|month_name)) }}
+      {% else %}
+        <p class="empty">No spending in {{ month|month_name }} or {{ prev_month|month_name }} yet.</p>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>To review{% if to_review %} <span class="count">{{ to_review }}</span>{% endif %}</h2>
+        {% if to_review > review|length %}<a href="/transactions?review=1">See all</a>{% endif %}
+      </div>
+      {% if review %}
+        <ul class="txns">{% for t in review %}{{ transaction_row(t, here, categories) }}{% endfor %}</ul>
+        <div class="card-foot">
+          <span class="muted small">Pick a category, or check it off if it's right.</span>
+          {{ review_all(review, here, "Mark these as reviewed" if review|length > 1 else "Mark as reviewed") }}
+        </div>
+      {% else %}
+        <p class="empty">{{ icon("check") }} All caught up. New transactions from your banks show up here to check.</p>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Spending by month</h2><a href="/transactions?month={{ month }}">{{ month|month_name }}'s transactions</a></div>
+      {% if not months.bars|selectattr("spent")|list %}
+        <p class="empty">No spending in the last 12 months yet.</p>
+      {% else %}
+      <div class="columns-chart">
+        <div class="columns-plot">
+          {% for t in months.ticks %}<div class="gridline" style="top: {{ t.top }}%"><span>{{ t.label }}</span></div>{% endfor %}
+          <div class="columns">
+            {% for b in months.bars %}
+              <a class="col{% if b.selected %} selected{% endif %}" href="/?month={{ b.month }}"
+                 aria-label="{{ b.month|month_label }}: {{ b.spent|money }} spent, {{ b.income|money }} income">
+                <span class="bar" style="height: {{ b.height }}%">{% if b.selected %}<span class="cap">{{ b.spent|compact_money }}</span>{% endif %}</span>
+                <span class="tip" aria-hidden="true"><b>{{ b.spent|money }}</b> spent<br>{{ b.income|money }} income<br><span class="muted">{{ b.month|month_label }}</span></span>
+              </a>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="col-ticks" aria-hidden="true">{% for b in months.bars %}<span>{{ b.tick }}{% if b.year %}<small>{{ b.year }}</small>{% endif %}</span>{% endfor %}</div>
+      </div>
+      <details class="chart-table">
+        <summary>Show as a table</summary>
+        <div class="table-scroll">
+          <table class="compact">
+            <thead><tr><th>Month</th><th class="num">Spent</th><th class="num">Income</th><th class="num">Income minus spending</th></tr></thead>
+            <tbody>
+              {% for b in months.bars|reverse %}
+                <tr><td><a href="/?month={{ b.month }}">{{ b.month|month_label }}</a></td><td class="num">{{ b.spent|money }}</td>
+                  <td class="num">{{ b.income|money }}</td><td class="num">{{ (b.income - b.spent)|money }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </details>
+      {% endif %}
+    </section>
+  </div>
+
+  <div class="dash-side">
+    <section class="card">
+      <div class="card-head"><h2>{{ "Budgets" if budget else "Top categories" }}</h2><a href="/budgets?month={{ month }}">{{ "See all" if budget else "Set budgets" }}</a></div>
+      {% if nodes %}
+        <ul class="cat-list">
+          {% for n in nodes[:6] %}
+            {% set look = transaction_look(looks, "regular", n.id) %}
+            <li>
+              <a class="cat-row" href="/transactions?month={{ month }}&category={{ n.id if n.id else 'none' }}">
+                {{ badge(look) }}
+                <span class="cat-name">{{ n.name }}</span>
+                <span class="cat-amount">{{ n.spent|money }}</span>
+              </a>
+              {% if n.total_budget %}
+                {{ meter(n.spent, n.total_budget, look.color) }}
+                <div class="cat-sub">{{ left_text(n.spent, n.total_budget, n.total_budget|money) }}</div>
+              {% elif not budget and totals.spent > 0 %}
+                {{ meter(n.spent, totals.spent, look.color) }}
+                <div class="cat-sub muted">{{ percent(n.spent, totals.spent) }}% of spending</div>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="empty">No spending in {{ month|month_name }} yet.</p>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Coming up</h2><a href="/recurring">Recurring</a></div>
+      {% if upcoming %}
+        <ul class="upcoming">
+          {% for r in upcoming %}
+            <li>
+              <span class="date-chip"><small>{{ r.next_date.strftime("%b") }}</small>{{ r.next_date.day }}</span>
+              <span class="up-name">{{ r.name }}<span class="muted small">{{ r.next_date|days_until|capitalize }}</span></span>
+              <span class="num{% if (r.amount or 0) > 0 %} money-in{% endif %}">{{ (r.amount or 0)|amount }}</span>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="empty">Nothing tracked is due in the next 30 days.</p>
+      {% endif %}
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Net worth</h2><a href="/accounts">Accounts</a></div>
+      {% set dollars, cents = worth.net|money_parts %}
+      <div class="stat-value">{{ dollars }}<span class="cents">{{ cents }}</span></div>
+      {% if worth_chart %}{{ line_chart(worth_chart, "Net worth over the last 90 days", height=64, table=false, compact=true) }}{% endif %}
+      <ul class="groups">
+        {% for g in worth.groups %}<li><span>{{ g.label }}</span><span class="num">{{ g.balance|money }}</span></li>{% endfor %}
+      </ul>
+    </section>
+  </div>
+</div>
+{% endblock %}

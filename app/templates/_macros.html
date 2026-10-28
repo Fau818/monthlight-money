@@ -1,0 +1,213 @@
+{# Shared pieces of the pages. Import with context where a macro uses `looks`. #}
+
+{% macro icon(name) -%}
+  <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    {%- if name == "home" -%}<path d="M3.5 10.5 12 4l8.5 6.5V19a1.5 1.5 0 0 1-1.5 1.5h-4v-6h-6v6H5A1.5 1.5 0 0 1 3.5 19z"/>
+    {%- elif name == "list" -%}<path d="M9 6.5h11M9 12h11M9 17.5h11"/><circle cx="4.75" cy="6.5" r="1"/><circle cx="4.75" cy="12" r="1"/><circle cx="4.75" cy="17.5" r="1"/>
+    {%- elif name == "pie" -%}<path d="M12 3.5A8.5 8.5 0 1 0 20.5 12H12z"/><path d="M15 3.9A8.5 8.5 0 0 1 20.1 9H15z"/>
+    {%- elif name == "repeat" -%}<path d="M4 11V9.5A3.5 3.5 0 0 1 7.5 6H19m0 0-3-3m3 3-3 3M20 13v1.5a3.5 3.5 0 0 1-3.5 3.5H5m0 0 3 3m-3-3 3-3"/>
+    {%- elif name == "bank" -%}<path d="M3.5 9.5 12 4.5l8.5 5zM5.5 10v7M10 10v7M14 10v7M18.5 10v7M3.5 20h17"/>
+    {%- elif name == "tag" -%}<path d="M3.5 12.6V4.5a1 1 0 0 1 1-1h8.1l8 8a1.4 1.4 0 0 1 0 2l-7 7a1.4 1.4 0 0 1-2 0z"/><circle cx="8" cy="8" r="1.4"/>
+    {%- elif name == "download" -%}<path d="M12 4v11m-4.5-4.5L12 15l4.5-4.5M4.5 19.5h15"/>
+    {%- elif name == "sliders" -%}<path d="M4 7h9m4 0h3M4 17h3m4 0h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>
+    {%- elif name == "sync" -%}<path d="M19.5 12a7.5 7.5 0 0 1-13 5.1M4.5 12a7.5 7.5 0 0 1 13-5.1M17.5 3.5v3.4h-3.4M6.5 20.5v-3.4h3.4"/>
+    {%- elif name == "search" -%}<circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/>
+    {%- elif name == "plus" -%}<path d="M12 5v14M5 12h14"/>
+    {%- elif name == "check" -%}<path d="m5 12.5 4.5 4.5L19 7.5"/>
+    {%- elif name == "left" -%}<path d="m14.5 5-7 7 7 7"/>
+    {%- elif name == "right" -%}<path d="m9.5 5 7 7-7 7"/>
+    {%- elif name == "more" -%}<circle cx="5.5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18.5" cy="12" r="1.2"/>
+    {%- elif name == "close" -%}<path d="M6 6l12 12M18 6 6 18"/>
+    {%- endif -%}
+  </svg>
+{%- endmacro %}
+
+{# The round emoji badge in a category's color; `look` comes from looks.py. #}
+{% macro badge(look, size="") -%}
+  <span class="cat-icon tint-{{ look.color }}{% if size %} {{ size }}{% endif %}" aria-hidden="true">{{ look.emoji or "?" }}</span>
+{%- endmacro %}
+
+{# With `excluded_option`, Excluded is a choice beside the categories, as in Copilot: a transaction is in one or the other. #}
+{% macro category_select(name, options, selected, autosubmit=false, empty="Uncategorized", label="Category", pill_look=none, excluded_option=false, excluded=false) %}
+  <select name="{{ name }}"{% if autosubmit %} data-autosubmit{% endif %} aria-label="{{ label }}"
+    {%- if pill_look %} class="pill tint-{{ pill_look.color }}"{% endif %}>
+    <option value="">{{ empty }}</option>
+    {% for o in options %}
+      <option value="{{ o.id }}"{% if o.id == selected and not excluded %} selected{% endif %}>{{ o.emoji }} {{ o.label }}</option>
+    {% endfor %}
+    {% if excluded_option %}<option value="excluded"{% if excluded %} selected{% endif %}>🚫 Excluded</option>{% endif %}
+  </select>
+{% endmacro %}
+
+{% macro month_nav(path, month, prev_month, next_month, this_month=none, extra="") %}
+  <div class="month-nav">
+    <a class="icon-btn" href="{{ path }}?month={{ prev_month }}{{ extra }}" aria-label="Previous month">{{ icon("left") }}</a>
+    <h1>{{ month|month_label }}</h1>
+    <a class="icon-btn" href="{{ path }}?month={{ next_month }}{{ extra }}" aria-label="Next month">{{ icon("right") }}</a>
+    {% if this_month and month != this_month %}<a class="chip" href="{{ path }}{% if extra %}?{{ extra[1:] }}{% endif %}">This month</a>{% endif %}
+  </div>
+{% endmacro %}
+
+{# A progress meter: `part` of `whole`, in a category's color; red once it's over. #}
+{% macro meter(part, whole, color="blue") %}
+  {% set over = whole and part > whole %}
+  <div class="meter tint-{{ color }}{% if over %} over{% endif %}"><span style="width: {{ percent(part, whole) }}%"></span></div>
+{% endmacro %}
+
+{# What's left of a budget, or how far over it is; with `of`, of what (like "$250.00" or "your $3,845.00 budget"). #}
+{% macro left_text(spent, budget, of=none) -%}
+  {% if spent > budget %}<span class="over-text">⚠ {{ (spent - budget)|money }} over{% if of %} {{ of }}{% endif %}</span>
+  {%- else %}{{ (budget - spent)|money }} left{% if of %} of {{ of }}{% endif %}{% endif %}
+{%- endmacro %}
+
+{# One transaction as a row of the list, as in Copilot: badge, name, category, amount, and a check to review it. #}
+{% macro transaction_row(t, here, categories, pick=false) %}
+  {# A payback shows the category of the purchase it pays back (shown_category_id); see main.find_transactions. #}
+  {% set look = transaction_look(looks, t.type, t.shown_category_id, t.excluded) %}
+  {# Rows that belong together share a word of data-link: a purchase and its paybacks, the two sides of a move, the
+     parts of a split (by the transaction they're split from, which isn't listed itself), and transactions linked
+     together, a linked split's parts with them. #}
+  {% set link = [t.reimburses_id or (t.id if t.paid_back) or ([t.id, t.transfer_id]|min if t.transfer_id) or t.split_from_id,
+                 ("l" ~ t.link_id) if t.links else (("l" ~ t.split_link_id) if t.split_links)]|select|join(" ") %}
+  <li class="txn{% if not t.reviewed %} unreviewed{% endif %}{% if t.excluded %} excluded{% endif %}{% if t.reimburses_id %} payback{% endif %}{% if t.type == "transfer" %} transfer{% endif %}{% if t.split_parts %} split{% endif %}{% if t.joined %} joined{% endif %}{% if t.more %} more{% endif %}{% if t.chain_up %} chain-up{% endif %}{% if t.chain_down %} chain-down{% endif %}{% if t.chain_through %} chain-through{% endif %}" id="t{{ t.id }}"{% if link %} data-link="{{ link }}"{% endif %}>
+    {% if pick %}<input type="checkbox" class="pick" name="ids" value="{{ t.id }}" form="bulk" aria-label="Select {{ t.name }}"{% if t.split_from_id %} data-part-of="{{ t.split_from_id }}"{% endif %}>{% endif %}
+    {{ badge(look) }}
+    <div class="txn-main">
+      <a class="txn-name" href="/transactions/{{ t.id }}?back={{ here|urlencode }}">{{ t.name }}</a>
+      <div class="txn-meta">
+        {%- if not t.reviewed %}<span class="dot" title="Not reviewed yet"></span>{% endif -%}
+        {%- if t.pending or t.split_pending %}<span class="badge">Pending</span>{% endif -%}
+        {%- if t.recurring_name %}<span class="badge" title="Recurring: {{ t.recurring_name }}">↻{% if t.recurring_name|lower != t.name|lower %} {{ t.recurring_name }}{% else %} Recurring{% endif %}</span>{% endif -%}
+        {%- if t.reimburses_id %}<a class="badge link-badge" href="/transactions/{{ t.reimburses_id }}?back={{ here|urlencode }}" data-jump="{{ t.reimburses_id }}" title="Counts with the purchase it pays back">↩ Pays back {{ t.purchase_name }}</a>{% endif -%}
+        {#- What's left for the user to pay. Paid back more than it cost, it's paid in full, and the extra counts like a refund. #}
+        {%- if t.paid_back %}{% set share = (-t.amount - t.paid_back)|round(2) %}<a class="badge link-badge" href="/transactions/{{ t.id }}?back={{ here|urlencode }}" title="{{ t.paid_back|money }} paid back for a {{ (-t.amount)|money }} purchase">↩ {% if share >= 0.005 %}Your share {{ share|money }}{% elif share <= -0.005 %}Paid back in full, {{ (-share)|money }} over{% else %}Paid back in full{% endif %}</a>{% endif -%}
+        {%- if t.transfer_id and t.other_account %}<a class="badge link-badge" href="/transactions/{{ t.transfer_id }}?back={{ here|urlencode }}" data-jump="{{ t.transfer_id }}" title="The other side of this move">↔ {{ "To" if t.amount < 0 else "From" }} {{ t.other_account }}</a>{% endif -%}
+        {%- if t.links %}<a class="badge link-badge" href="/transactions/{{ t.id }}?back={{ here|urlencode }}" title="Linked with {{ t.links }} other {{ 'transaction' if t.links == 1 else 'transactions' }}">🔗 Linked</a>{% endif -%}
+        {#- Under its split's row (main.with_split_heads), a part needs no badge; elsewhere, like the dashboard, it does. #}
+        {%- if t.split_from_id and not t.under_head %}<a class="badge link-badge" href="/transactions/{{ t.split_from_id }}?back={{ here|urlencode }}" title="Part of a {{ (t.split_total|abs)|money }} transaction; open it to change the split">✂ Split</a>
+          {%- if t.split_siblings_sum is not none and (t.split_siblings_sum - t.split_total)|abs >= 0.005 %}<span class="badge warn" title="The parts add up to {{ (t.split_siblings_sum|abs)|money }}, but the transaction is {{ (t.split_total|abs)|money }}">Split doesn't add up</span>{% endif %}
+        {%- endif -%}
+        {%- if t.split_parts %}<span class="badge">✂ In {{ t.split_parts }} parts</span>{% if (t.split_sum - t.amount)|abs >= 0.005 %}<span class="badge warn">Parts add up to {{ t.split_sum|amount }}</span>{% endif %}{% endif -%}
+        {%- for g in t.tags or [] %}<a class="tag tint-{{ g.color }}" href="/transactions?tag={{ g.id }}" title="Show everything tagged {{ g.name }}">{{ g.name }}</a>{% endfor -%}
+        <span>{{ t.account_name }}{% if t.account_mask %} ••{{ t.account_mask }}{% endif %}</span>
+        {#- Listed on another day (a payback with its purchase, money in under the move it came from): its own date. #}
+        {%- if t.shown_date and t.date != t.shown_date %}<span>{{ "received" if t.amount > 0 else "on" }} {{ t.date|short_date }}</span>{% endif -%}
+        {%- if t.notes %}<span class="note">{{ t.notes }}</span>{% endif -%}
+      </div>
+    </div>
+    <div class="txn-cat">
+      {% if t.reimburses_id %}
+        <span class="pill static tint-{{ look.color }}" title="{{ "Left out of spending" if t.excluded else "Uses the category of the purchase it pays back" }}">{{ look.emoji }} {{ "Excluded" if t.excluded else (t.category_name or "Uncategorized") }}</span>
+      {% elif t.split_parts %}
+        <span class="pill static tint-gray" title="Its parts count, each in its own category">✂ Split</span>
+      {% elif t.type == "regular" %}
+        <form method="post" action="/transactions/{{ t.id }}/category" data-swap>
+          <input type="hidden" name="back" value="{{ here }}">
+          {{ category_select("category_id", categories, t.category_id, autosubmit=true, label="Category for " ~ t.name, pill_look=look, excluded_option=true, excluded=t.excluded) }}
+          <noscript><button type="submit">Save</button></noscript>
+        </form>
+      {% else %}
+        <span class="pill static tint-{{ look.color }}">{{ t.type|capitalize }}</span>{# income and transfers don't take a category #}
+      {% endif %}
+    </div>
+    <div class="txn-amount{% if t.amount > 0 %} money-in{% endif %}">{{ t.amount|amount }}</div>
+    <div class="txn-review">
+      {% if not t.reviewed %}
+        <form method="post" action="/transactions/review" data-swap>
+          <input type="hidden" name="back" value="{{ here }}">
+          <input type="hidden" name="ids" value="{{ t.id }}">
+          <button type="submit" class="icon-btn review-btn" title="Mark as reviewed" aria-label="Mark {{ t.name }} as reviewed">{{ icon("check") }}</button>
+        </form>
+      {% endif %}
+    </div>
+  </li>
+{% endmacro %}
+
+{# The row heading a split's parts in the list (main.with_split_heads): its name and total, which don't count
+   themselves since the parts under it do. Opening it shows the whole split. #}
+{% macro split_head(s, here, pick=false) %}
+  {#- Only its parts are excluded (splits.save): it shows whether all of them are, or how many. -#}
+  {% set all_excluded = s.split_excluded and s.split_excluded == s.split_count %}
+  <li class="txn split-head{% if all_excluded %} excluded{% endif %}{% if s.chain_up %} chain-up{% endif %}{% if s.chain_down %} chain-down{% endif %}" id="split{{ s.id }}" data-link="{{ s.id }}{% if s.links %} l{{ s.link_id }}{% endif %}">
+    {#- Ticks all of its parts in the list (app.js); it isn't sent itself. -#}
+    {% if pick %}<input type="checkbox" class="pick-group js-only" data-pick-group="{{ s.id }}" aria-label="Select all parts of {{ s.name }}">{% endif %}
+    <span class="cat-icon tint-gray" aria-hidden="true">✂</span>
+    <div class="txn-main">
+      <a class="txn-name" href="/transactions/{{ s.id }}?back={{ here|urlencode }}">{{ s.name }}</a>
+      <div class="txn-meta">
+        {%- if s.pending %}<span class="badge">Pending</span>{% endif -%}
+        {%- if s.split_siblings_sum is not none and (s.split_siblings_sum - s.amount)|abs >= 0.005 %}<span class="badge warn" title="The parts add up to {{ (s.split_siblings_sum|abs)|money }}, but the transaction is {{ (s.amount|abs)|money }}">Split doesn't add up</span>{% endif -%}
+        {%- if all_excluded %}<span class="badge" title="None of its parts count">Excluded</span>{% elif s.split_excluded %}<span class="badge" title="Excluded parts don't count; the others do">{{ s.split_excluded }} excluded</span>{% endif -%}
+        {%- if s.links %}<a class="badge link-badge" href="/transactions/{{ s.id }}?back={{ here|urlencode }}" title="Linked with {{ s.links }} other {{ 'transaction' if s.links == 1 else 'transactions' }}">🔗 Linked</a>{% endif -%}
+        <span>Split into {{ s.split_count }}</span>
+        <span>{{ s.account_name }}{% if s.account_mask %} ••{{ s.account_mask }}{% endif %}</span>
+      </div>
+    </div>
+    <div class="txn-cat"></div>
+    <div class="txn-amount{% if s.amount > 0 %} money-in{% endif %}" title="The parts below count, each in its own category">{{ s.amount|amount }}</div>
+    <div class="txn-review"></div>
+  </li>
+{% endmacro %}
+
+{# A button that marks the given transactions as reviewed. #}
+{% macro review_all(rows, here, label=none) %}
+  {% set unreviewed = rows|rejectattr("reviewed")|list %}
+  {% if unreviewed %}
+    <form method="post" action="/transactions/review" data-swap class="inline">
+      <input type="hidden" name="back" value="{{ here }}">
+      {% for t in unreviewed %}<input type="hidden" name="ids" value="{{ t.id }}">{% endfor %}
+      <button type="submit" class="small">{{ icon("check") }} {{ label or ("Mark " ~ plural(unreviewed|length, "transaction") ~ " as reviewed") }}</button>
+    </form>
+  {% endif %}
+{% endmacro %}
+
+{# A line chart from main.pace_chart or main.worth_chart: SVG lines under HTML dots and labels, a hover readout
+   (app.js), and a table with the same numbers. #}
+{% macro line_chart(chart, title, height=190, table=true, compact=false) %}
+  <figure class="chart{% if compact %} compact{% endif %}">
+    <div class="plot" data-plot tabindex="0" role="img" aria-label="{{ title }}. Point at it, or use the arrow keys, to read the values." style="height: {{ height }}px">
+      {% if not compact %}
+        {% for t in chart.ticks %}<div class="gridline" style="top: {{ t.top }}%"><span>{{ t.label }}</span></div>{% endfor %}
+      {% endif %}
+      {% for m in chart.markers %}<div class="marker" style="top: {{ m.top }}%"><span>{{ m.label }} {{ m.value|compact_money }}</span></div>{% endfor %}
+      <svg viewBox="0 0 1000 300" preserveAspectRatio="none" aria-hidden="true">
+        {% for s in chart.series %}
+          {% if s.area_path %}<path class="area role-{{ s.role }}" d="{{ s.area_path }}"/>{% endif %}
+          {% if s["values"]|length > 1 %}<polyline class="line role-{{ s.role }}" points="{{ s.points }}"/>{% endif %}
+        {% endfor %}
+      </svg>
+      {% for s in chart.series if s.end %}
+        <span class="end-dot role-{{ s.role }}" style="left: {{ s.end.left }}%; top: {{ s.end.top }}%"></span>
+        {% if s.role == "main" and not compact %}<span class="end-label{% if s.end.left < 30 %} right{% endif %}" style="left: {{ s.end.left }}%; top: {{ s.end.top }}%">{{ s.end.value|compact_money }}</span>{% endif %}
+      {% endfor %}
+      <div class="crosshair" hidden></div>
+      {% for s in chart.series %}<span class="hover-dot role-{{ s.role }}" hidden></span>{% endfor %}
+      <div class="tip" hidden></div>
+      <script type="application/json">{{ chart.hover|tojson }}</script>
+    </div>
+    {% if not compact %}
+      <div class="x-ticks" aria-hidden="true">{% for t in chart.x_ticks %}<span style="left: {{ t.left }}%">{{ t.label }}</span>{% endfor %}</div>
+    {% endif %}
+    {% if chart.series|length > 1 %}
+      <figcaption class="legend">
+        {% for s in chart.series|reverse %}<span><i class="key role-{{ s.role }}"></i>{{ s.name }}</span>{% endfor %}
+      </figcaption>
+    {% endif %}
+    {% if table %}
+      <details class="chart-table">
+        <summary>Show as a table</summary>
+        <div class="table-scroll">
+          <table class="compact">
+            <thead><tr><th>Day</th>{% for s in chart.series|reverse %}<th class="num">{{ s.name }}</th>{% endfor %}</tr></thead>
+            <tbody>
+              {% for label in chart.hover.labels %}
+                {% set i = loop.index0 %}
+                <tr><td>{{ label }}</td>{% for s in chart.series|reverse %}<td class="num">{{ s["values"][i]|money if i < s["values"]|length else "" }}</td>{% endfor %}</tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    {% endif %}
+  </figure>
+{% endmacro %}

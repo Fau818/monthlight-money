@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% from "_macros.html" import category_select, badge, icon with context %}
+{% block title %}Recurring{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Recurring</h1></div>
+
+<section class="card">
+  <div class="stat-row">
+    <div><div class="label">A month, on average</div><div class="stat-value">{{ monthly|money }}</div></div>
+    <div><div class="label">Paid this month</div><div class="stat-value">{{ summary.paid|money }}</div></div>
+    <div><div class="label">Still to come this month</div><div class="stat-value">{{ summary.due|money }}</div></div>
+  </div>
+</section>
+
+{% if summary.due_items %}
+  <section class="card">
+    <h2>Still to come this month</h2>
+    <ul class="upcoming">
+      {% for r in summary.due_items %}
+        <li>
+          <span class="date-chip"><small>{{ r.next_date.strftime("%b") }}</small>{{ r.next_date.day }}</span>
+          <span class="up-name">{{ r.name }}<span class="muted small">{{ r.next_date|days_until(today)|capitalize }}</span></span>
+          <span class="num">{{ (r.amount or 0)|amount }}</span>
+        </li>
+      {% endfor %}
+    </ul>
+  </section>
+{% endif %}
+
+<section class="card">
+  <h2>Tracked</h2>
+  {% if items %}
+    <ul class="rec-list">
+      {% for r in items %}
+        <li{% if not r.active %} class="inactive"{% endif %}>
+          <details class="expand">
+          <summary class="rec-row" title="Edit {{ r.name }}">
+            {{ badge(transaction_look(looks, "regular", r.category_id)) }}
+            <span class="rec-main">
+              <strong>{{ r.name }}</strong>
+              <span class="muted small">{{ r.frequency|capitalize }} · {{ plural(r.count, "charge") }}{% if r.last_date %} · last {{ r.last_date|short_date }}{% endif %}</span>
+            </span>
+            <span class="rec-next">
+              {% if not r.active %}<span class="badge">Paused</span>
+              {% elif r.late %}<span class="badge warn">⚠ Late — canceled?</span>
+              {% elif r.next_date %}<span class="muted small">Next</span> {{ r.next_date|short_date }}{% endif %}
+            </span>
+            <span class="num{% if (r.amount or 0) > 0 %} money-in{% endif %}">{{ (r.amount or 0)|amount }}</span>
+            <span class="chev">{{ icon("right") }}</span>
+          </summary>
+          <div class="expand-body">
+            <form method="post" action="/recurring/{{ r.id }}" class="edit-grid">
+              <label>Name <input name="name" value="{{ r.name }}" required></label>
+              <label>Every
+                <select name="frequency">{% for f in frequencies %}<option value="{{ f }}"{% if f == r.frequency %} selected{% endif %}>{{ f }}</option>{% endfor %}</select>
+              </label>
+              <label>Amount <input class="money" name="amount" value="{{ '%.2f'|format(r.amount) if r.amount is not none else '' }}" inputmode="decimal"></label>
+              <label>Category {{ category_select("category_id", categories, r.category_id, empty="No category") }}</label>
+              <label class="check"><input type="checkbox" name="active" value="1"{% if r.active %} checked{% endif %}> Active</label>
+              <span class="muted small">Matches names containing “{{ r.pattern }}”</span>
+              <div class="form-actions"><button type="submit" class="primary">Save</button></div>
+            </form>
+            <form method="post" action="/recurring/{{ r.id }}/delete" data-confirm="Stop tracking {{ r.name }}? Its transactions stay.">
+              <button type="submit" class="link danger-text">Stop tracking</button>
+            </form>
+          </div>
+          </details>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="empty">Nothing tracked yet. Your Copilot import brings in your recurring charges, and suggestions appear below as transactions build up.</p>
+  {% endif %}
+</section>
+
+{% if candidates %}
+  <section class="card">
+    <h2>Looks recurring</h2>
+    <p class="muted small">These repeat on a schedule but aren't tracked yet.</p>
+    <ul class="rec-list">
+      {% for c in candidates %}
+        <li>
+          <div class="rec-row">
+            {{ badge(transaction_look(looks, "regular", c.category_id)) }}
+            <div class="rec-main"><strong>{{ c.name }}</strong><span class="muted small">{{ c.frequency|capitalize }} · {{ plural(c.count, "time") }} · last {{ c.last_date|short_date }}</span></div>
+            <div class="num">{{ c.amount|amount }}</div>
+            <form method="post" action="/recurring/track" class="inline">
+              <input type="hidden" name="name" value="{{ c.name }}">
+              <input type="hidden" name="pattern" value="{{ c.pattern }}">
+              <input type="hidden" name="frequency" value="{{ c.frequency }}">
+              <input type="hidden" name="amount" value="{{ c.amount }}">
+              <input type="hidden" name="category_id" value="{{ c.category_id or '' }}">
+              <button type="submit" class="small">{{ icon("plus") }} Track</button>
+            </form>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  </section>
+{% endif %}
+
+<details class="card fold">
+  <summary><h2>Track one yourself</h2></summary>
+  <form method="post" action="/recurring/track" class="edit-grid">
+    <label>Name <input name="name" placeholder="For example, Netflix" required></label>
+    <label>Text in the transaction name <input name="pattern" placeholder="netflix" required></label>
+    <label>Every <select name="frequency">{% for f in frequencies %}<option value="{{ f }}"{% if f == "monthly" %} selected{% endif %}>{{ f }}</option>{% endfor %}</select></label>
+    <label>Amount <input name="amount" class="money" placeholder="-15.49" inputmode="decimal"></label>
+    <label>Category {{ category_select("category_id", categories, none, empty="No category") }}</label>
+    <div class="form-actions"><button type="submit" class="primary">Track</button></div>
+  </form>
+</details>
+{% endblock %}

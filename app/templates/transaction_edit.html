@@ -1,0 +1,358 @@
+{% extends "base.html" %}
+{% from "_macros.html" import category_select, badge, icon with context %}
+{% macro linked(x) -%}
+  <a class="linked" href="/transactions/{{ x.id }}?back={{ here|urlencode }}">
+    <span>{{ x.name }}</span><span class="muted small">{% if x.category_id in category_names %}{{ looks[x.category_id].emoji }} {{ category_names[x.category_id] }} · {% endif %}{{ x.date|short_date }} · {{ x.account_name }}{% if x.account_mask %} ••{{ x.account_mask }}{% endif %}{% if x.excluded %} · Excluded{% endif %}</span>
+    <span class="num{% if x.amount > 0 %} money-in{% endif %}{% if x.excluded %} struck{% endif %}">{{ x.amount|amount }}</span>
+  </a>
+{%- endmacro %}
+{% macro option(c) %}<option value="{{ c.id }}">{{ c.date|short_date }} · {{ c.name }} · {{ c.amount|amount }} · {{ c.account_name }}</option>{% endmacro %}
+{# The choices for linking a payback and its purchase: those that fit, then, in a group of their own, those that would
+   pay the purchase back in full with some over. #}
+{% macro choices(rows, oversized, label, oversized_label) -%}
+  {%- if oversized -%}
+    {%- if rows %}<optgroup label="{{ label }}">{% for c in rows %}{{ option(c) }}{% endfor %}</optgroup>{% endif -%}
+    <optgroup label="{{ oversized_label }}">{% for c in oversized %}{{ option(c) }}{% endfor %}</optgroup>
+  {%- else -%}
+    {% for c in rows %}{{ option(c) }}{% endfor %}
+  {%- endif -%}
+{%- endmacro %}
+{# The parts of a split, as rows of name, amount and category; app.js keeps a running total and adds or removes rows. #}
+{% macro split_form(t, rows, button) %}
+  <form method="post" action="/transactions/{{ t.id }}/split" data-split data-total="{{ (t.amount|abs * 100)|round|int }}">
+    <input type="hidden" name="back" value="{{ here }}">
+    <ul class="split-rows">
+      {% for p in rows %}
+        <li class="split-row">
+          <input type="hidden" name="part_id" value="{{ p.id or '' }}">
+          <input name="part_name" value="{{ p.name }}" placeholder="{{ t.name }}" aria-label="Name of part {{ loop.index }}">
+          <input name="part_amount" value="{{ p.amount }}" class="money" inputmode="decimal" placeholder="The rest" aria-label="Amount of part {{ loop.index }}">
+          {% if t.type == "regular" %}{{ category_select("part_category", categories, p.category_id, label="Category of part " ~ loop.index) }}{% else %}<input type="hidden" name="part_category" value="">{% endif %}
+          <button type="button" class="icon-btn js-only" data-remove-part aria-label="Remove part {{ loop.index }}">{{ icon("close") }}</button>
+        </li>
+      {% endfor %}
+    </ul>
+    <p class="split-status" data-split-status aria-live="polite">Total {{ (t.amount|abs)|money }}</p>
+    <div class="form-actions">
+      <button type="button" class="js-only" data-add-part>{{ icon("plus") }} Add a part</button>
+      <button type="submit" class="primary">{{ button }}</button>
+    </div>
+    <p class="muted small">Leave one amount empty and that part gets what's left. To remove a part, empty its name and amount.</p>
+  </form>
+{% endmacro %}
+{% block title %}{{ t.name }}{% endblock %}
+{% block content %}
+<p><a class="back" href="{{ back }}">{{ icon("left") }} Back</a></p>
+{% set look = transaction_look(looks, t.type, t.category_id or (parts[0].category_id if parts else none), t.excluded) %}
+<div class="sheet">
+  <header class="sheet-head">
+    {{ badge(look, "large") }}
+    <div class="sheet-amount{% if t.amount > 0 %} money-in{% endif %}">{{ t.amount|amount }}</div>
+    <h1>{{ t.name }}</h1>
+    <p class="muted">
+      {{ t.date|day_label }} · {{ t.account_name }}{% if t.account_mask %} ••{{ t.account_mask }}{% endif %}
+      {% if t.pending or (split_parent and split_parent.pending) %} · <span class="badge">Pending</span>{% endif %}
+      {% if parts %} · <span class="badge">✂ Split</span>{% endif %}
+    </p>
+  </header>
+
+  {% if parts %}
+    {% set parts_sum = parts|sum(attribute="amount") %}
+    {% set combined = t.source == "group" and not t.plaid_transaction_id %}
+    <section class="card">
+      <h2>{{ "Combined from %d transactions"|format(parts|length) if combined else "Split into %d parts"|format(parts|length) }}</h2>
+      {% if (parts_sum - t.amount)|abs >= 0.005 %}
+        <p class="alert">Your bank says {{ t.amount|amount }}, but the parts add up to {{ parts_sum|amount }}. Change their amounts so they add up.</p>
+      {% endif %}
+      <p class="muted small">{% if combined %}They show as this one line in your list; each still counts on its own, in its own category. Open one to change it.{% else %}The parts count, each in its own category; this transaction as your bank sent it doesn't. Open a part to change its type, notes or tags, or to exclude it.{% endif %}</p>
+      <ul class="link-rows">{% for p in parts %}<li>{{ linked(p) }}</li>{% endfor %}</ul>
+      {% set out = parts|selectattr("excluded")|list %}
+      {% if out %}
+        <p class="muted small">{% if out|length == parts|length %}Every part is excluded, so none of it counts.{% else %}{{ plural(out|length, "part") }} excluded ({{ (out|sum(attribute="amount")|abs)|money }}); the others count.{% endif %}</p>
+      {% endif %}
+      {# Its name, as its row in the list shows it, and its date: one order, one date, so the parts take it (db.py). #}
+      <form method="post" action="/transactions/{{ t.id }}/whole" class="inline-edit" data-swap>
+        <input type="hidden" name="back" value="{{ here }}">
+        <input name="name" value="{{ t.name }}" required aria-label="Name">
+        <input type="date" name="date" value="{{ t.date }}" required aria-label="Date">
+        <button type="submit">Save</button>
+      </form>
+      <p class="muted small">{{ "They're" if combined else "The parts are" }} dated like it{% if t.date_edited %}. You set this date, so updates from your bank won't change it{% endif %}.</p>
+      {% if combined %}
+      <form method="post" action="/transactions/{{ t.id }}/unsplit" class="inline" data-confirm="Ungroup “{{ t.name }}”? Its {{ parts|length }} transactions show separately again, each on its own date.">
+        <input type="hidden" name="back" value="{{ back }}">
+        <button type="submit" class="link danger-text">Ungroup</button>
+      </form>
+      {% else %}
+      <details class="fold"{% if (parts_sum - t.amount)|abs >= 0.005 %} open{% endif %}>
+        <summary><h2>Change the split</h2></summary>
+        {% set rows = [] %}
+        {% for p in parts %}{% set _ = rows.append({"id": p.id, "name": p.name, "amount": "%.2f"|format(p.amount|abs), "category_id": p.category_id}) %}{% endfor %}
+        {% set _ = rows.append({"id": none, "name": "", "amount": "", "category_id": none}) %}
+        {{ split_form(t, rows, "Save split") }}
+      </details>
+      <form method="post" action="/transactions/{{ t.id }}/unsplit" class="inline"
+            data-confirm="Unsplit “{{ t.name }}”? It counts as one {{ (t.amount|abs)|money }} transaction again.{% if parts|selectattr('source', 'ne', 'split')|list %} Parts that came from your history stay as transactions of their own, on their own dates.{% endif %}">
+        <input type="hidden" name="back" value="{{ here }}">
+        <button type="submit" class="link danger-text">Unsplit</button>
+      </form>
+      {% endif %}
+    </section>
+  {% else %}
+  <form method="post" action="/transactions/{{ t.id }}" class="card form-list">
+    <input type="hidden" name="back" value="{{ back }}">
+    <label class="field">Name <input name="name" value="{{ t.name }}" required></label>
+    {% if split_parent %}
+      {% set whole = "combined line" if split_parent.source == "group" and not split_parent.plaid_transaction_id else "transaction it's split from" %}
+      <div class="field">Date <span class="muted">{{ t.date|day_label }}, like the <a href="/transactions/{{ split_parent.id }}?back={{ back|urlencode }}">{{ whole }}</a>. Change it there.
+        {%- if t.own_date and t.own_date != t.date %} Taken out, it gets its own date back: {{ t.own_date|day_label }}.{% endif %}</span></div>
+    {% else %}
+    <label class="field">Date <input type="date" name="date" value="{{ t.date }}" required>
+      {% if t.date_edited %}<span class="muted small">You set this date, so updates from your bank won't change it.</span>{% endif %}
+    </label>
+    {% endif %}
+    <fieldset class="field">
+      <legend>Type</legend>
+      <div class="segmented">
+        {% for value, label, hint in [("regular", "Regular", "Counts as spending, or a refund"), ("income", "Income", "Money you earned"), ("transfer", "Transfer", "Between your own accounts; not counted")] %}
+          <label title="{{ hint }}"><input type="radio" name="type" value="{{ value }}" data-type-select{% if t.type == value %} checked{% endif %}><span>{{ label }}</span></label>
+        {% endfor %}
+      </div>
+    </fieldset>
+    {% if purchase %}
+      <div class="field">Category <span class="muted">Uses the category of “{{ purchase.name }}”, which it pays back.</span></div>
+    {% else %}
+      <label class="field" data-category-field{% if t.type != "regular" %} hidden{% endif %}>Category {{ category_select("category_id", categories, t.category_id, excluded_option=true, excluded=t.excluded) }}</label>
+    {% endif %}
+    {% if not split_parent %}
+      <label class="field" data-recurring-field{% if t.type == "transfer" %} hidden{% endif %}>Recurring
+        <select name="recurring_id">
+          <option value="">Not recurring</option>
+          {% for r in recurring_list %}<option value="{{ r.id }}"{% if r.id == t.recurring_id %} selected{% endif %}>{{ r.name }}</option>{% endfor %}
+        </select>
+      </label>
+    {% endif %}
+    <label class="field">Notes <textarea name="notes" rows="2" placeholder="Add a note">{{ t.notes or "" }}</textarea></label>
+    <fieldset class="field">
+      <legend>Tags</legend>
+      <input type="hidden" name="tags_shown" value="1">
+      {% if tag_looks %}
+        <div class="tag-picks">
+          {% for g in tag_looks.values() %}
+            <label class="tag-pick tint-{{ g.color }}"><input type="checkbox" name="tag_ids" value="{{ g.id }}"{% if g.id in tag_ids %} checked{% endif %}><span>{{ g.name }}</span></label>
+          {% endfor %}
+        </div>
+      {% endif %}
+      <input name="new_tags" placeholder="{{ 'New tags' if tag_looks else 'Add tags' }}, separated by commas" aria-label="New tags, separated by commas">
+    </fieldset>
+    <label class="switch"><input type="checkbox" name="reviewed" value="1"{% if t.reviewed or t.reviewed is none %} checked{% endif %}><span>Reviewed</span></label>
+    <label class="switch"><input type="checkbox" name="make_rule" value="1"><span>Do the same for every transaction with this name, now and in the future</span></label>
+    <div class="form-actions"><button type="submit" class="primary">Save</button><a class="button" href="{{ back }}" data-close>Cancel</a></div>
+  </form>
+  {% endif %}
+
+  {% if split_parent %}
+    {% set split_sum = t.amount + siblings|sum(attribute="amount") %}
+    <section class="card">
+      <h2>Part of a split</h2>
+      {% if (split_sum - split_parent.amount)|abs >= 0.005 %}
+        <p class="alert">The parts add up to {{ split_sum|amount }}, but the transaction is {{ split_parent.amount|amount }}. Open it to fix the amounts.</p>
+      {% endif %}
+      <ul class="link-rows"><li>{{ linked(split_parent) }}</li></ul>
+      {% if siblings %}
+        <p class="muted small">Its other {{ "part" if siblings|length == 1 else "parts" }}:</p>
+        <ul class="link-rows">{% for s in siblings %}<li>{{ linked(s) }}</li>{% endfor %}</ul>
+      {% endif %}
+      <p class="muted small">Open the original to change the amounts, add a part, or unsplit it.</p>
+    </section>
+  {% endif %}
+
+  {% if linked_rows %}
+    <section class="card">
+      <h2>Linked with</h2>
+      <ul class="link-rows">{% for x in linked_rows %}<li>{{ linked(x) }}</li>{% endfor %}</ul>
+      <dl class="details-list">
+        <div><dt>Together</dt><dd><strong>{{ (t.amount + linked_rows|sum(attribute="amount"))|amount }}</strong></dd></div>
+      </dl>
+      <form method="post" action="/transactions/{{ t.id }}/unlink" class="inline" data-swap>
+        <input type="hidden" name="back" value="{{ here }}">
+        <button type="submit" class="link danger-text">Unlink this one</button>
+      </form>
+      <p class="muted small">Each counts on its own date and in its own category. The list shows them together, joined by a line, on the biggest one's day.</p>
+    </section>
+  {% endif %}
+
+  {% if purchase %}
+    <section class="card">
+      <h2>Pays back</h2>
+      <ul class="link-rows">
+        <li>{{ linked(purchase) }}
+          <form method="post" action="/transactions/{{ t.id }}/pays-back" class="inline" data-swap>
+            <input type="hidden" name="back" value="{{ here }}"><input type="hidden" name="purchase_id" value="">
+            <button type="submit" class="link danger-text">Unlink</button>
+          </form>
+        </li>
+      </ul>
+      <p class="muted small">It counts in that purchase's category and on its date, so the purchase costs you only your share.</p>
+    </section>
+  {% elif paybacks is not none %}
+    {% set paid = paybacks|sum(attribute="amount") %}
+    <details class="card fold"{% if paybacks %} open{% endif %}>
+      <summary><h2>{{ "Paid back" if paybacks else "Did friends pay you back for this?" }}</h2></summary>
+      {% if paybacks %}
+        <ul class="link-rows">
+          {% for b in paybacks %}
+            <li>{{ linked(b) }}
+              <form method="post" action="/transactions/{{ b.id }}/pays-back" class="inline" data-swap>
+                <input type="hidden" name="back" value="{{ here }}"><input type="hidden" name="purchase_id" value="">
+                <button type="submit" class="link danger-text">Unlink</button>
+              </form>
+            </li>
+          {% endfor %}
+        </ul>
+        {% set share = (-t.amount - paid)|round(2) %}
+        <dl class="details-list">
+          <div><dt>Purchase</dt><dd>{{ (-t.amount)|money }}</dd></div>
+          <div><dt>Paid back</dt><dd class="money-in">{{ paid|money }}</dd></div>
+          <div><dt>Your share</dt><dd><strong>{{ [share, 0]|max|money }}</strong>{% if share < 0.005 %} · paid back in full{% endif %}</dd></div>
+          {% if share <= -0.005 %}<div><dt>More than it cost</dt><dd class="money-in">{{ (-share)|money }}</dd></div>{% endif %}
+        </dl>
+        {% if share <= -0.005 %}<p class="muted small">The {{ (-share)|money }} more than it cost counts like a refund, in this purchase's category.</p>{% endif %}
+      {% else %}
+        <p class="muted small">Link the money friends sent you for their part: this purchase then counts only your share, in its own month and category.</p>
+      {% endif %}
+      {% if candidates or oversized %}
+        <form method="post" action="/transactions/{{ t.id }}/paybacks" class="inline-edit" data-swap>
+          <input type="hidden" name="back" value="{{ here }}">
+          <select name="payback_id" required aria-label="Money that paid this back">
+            <option value="">Choose money that came in…</option>
+            {{ choices(candidates, oversized, "Up to " ~ (-t.amount)|money, "More than " ~ (-t.amount)|money) }}
+          </select>
+          <button type="submit">Link</button>
+        </form>
+      {% elif not paybacks %}
+        <p class="muted small">No money came in within 60 days that could be it.</p>
+      {% endif %}
+    </details>
+  {% elif candidates is not none %}
+    <details class="card fold">
+      <summary><h2>Paying you back for a purchase?</h2></summary>
+      <p class="muted small">If this is a friend's share of something you bought, link it to that purchase: it then counts in the purchase's category and month.</p>
+      {% if candidates or oversized %}
+        <form method="post" action="/transactions/{{ t.id }}/pays-back" class="inline-edit" data-swap>
+          <input type="hidden" name="back" value="{{ here }}">
+          <select name="purchase_id" required aria-label="Purchase it pays back">
+            <option value="">Choose the purchase…</option>
+            {{ choices(candidates, oversized, t.amount|money ~ " or more", "Less than " ~ t.amount|money) }}
+          </select>
+          <button type="submit">Link</button>
+        </form>
+      {% else %}
+        <p class="muted small">No purchase in the 60 days before could be it.</p>
+      {% endif %}
+    </details>
+  {% endif %}
+
+  {% if other %}
+    <section class="card">
+      <h2>Other side</h2>
+      <ul class="link-rows">
+        <li>{{ linked(other) }}
+          <form method="post" action="/transactions/{{ t.id }}/other-side" class="inline" data-swap>
+            <input type="hidden" name="back" value="{{ here }}"><input type="hidden" name="other_id" value="">
+            <button type="submit" class="link danger-text">Unlink</button>
+          </form>
+        </li>
+      </ul>
+      <p class="muted small">One move between your accounts: the money stayed yours, so neither side counts as spending or income.</p>
+    </section>
+  {% elif other_candidates is not none and (t.type == "transfer" or other_candidates) %}
+    <details class="card fold"{% if t.type == "transfer" %} open{% endif %}>
+      <summary><h2>{{ "Other side" if t.type == "transfer" else "A move between your accounts?" }}</h2></summary>
+      {% if other_candidates %}
+        <p class="muted small">{% if t.type == "transfer" %}Which of these is the other side of this move?{% else %}If this money went to, or came from, another of your accounts, link the other side: both become transfers, and neither counts as spending.{% endif %}</p>
+        <form method="post" action="/transactions/{{ t.id }}/other-side" class="inline-edit" data-swap>
+          <input type="hidden" name="back" value="{{ here }}">
+          <select name="other_id" required aria-label="The other side">
+            <option value="">Choose the other side…</option>
+            {% for c in other_candidates %}<option value="{{ c.id }}">{{ c.date|short_date }} · {{ c.name }} · {{ c.amount|amount }} · {{ c.account_name }}</option>{% endfor %}
+          </select>
+          <button type="submit">Link</button>
+        </form>
+      {% else %}
+        <p class="muted small">No transaction on your other accounts has the opposite amount within 10 days. If the other side is at a bank that isn't connected, that's expected.</p>
+      {% endif %}
+    </details>
+  {% endif %}
+
+  {% if combine %}
+    <details class="card fold">
+      <summary><h2>Combine with others into one</h2></summary>
+      <p class="muted small">Put back together a purchase you split in Copilot, like the items of one order: they show as one line, and opening it shows each one with its amount and category. Nothing's total changes.</p>
+      <form method="post" action="/transactions/{{ t.id }}/combine" class="form-list">
+        <input type="hidden" name="back" value="{{ back }}">
+        <label class="field">Name of the combined line <input name="name" value="{{ combine_name }}" required></label>
+        <fieldset class="field">
+          <legend>Combine “{{ t.name }}” with</legend>
+          <ul class="pick-rows">
+            {% for c in combine %}
+              <li><label><input type="checkbox" name="ids" value="{{ c.id }}"{% if c.date == t.date %} checked{% endif %}>
+                <span>{{ c.name }} <span class="muted small">{{ c.date|short_date }}</span></span><span class="num">{{ c.amount|amount }}</span></label></li>
+            {% endfor %}
+          </ul>
+        </fieldset>
+        <div class="form-actions"><button type="submit" class="primary">Combine</button></div>
+      </form>
+    </details>
+  {% endif %}
+
+  {% if not parts and not split_problem %}
+    <details class="card fold">
+      <summary><h2>Split this transaction</h2></summary>
+      <p class="muted small">Divide it into parts, each with its own amount and category, like a store trip that was part groceries and part household. The parts then count instead of it.</p>
+      {{ split_form(t, [{"id": none, "name": t.name, "amount": "", "category_id": t.category_id if t.type == "regular" else none},
+                        {"id": none, "name": t.name, "amount": "", "category_id": none}], "Split") }}
+    </details>
+  {% endif %}
+
+  <section class="card details-list">
+    <h2>Details</h2>
+    <dl>
+      <div><dt>Account</dt><dd>{{ t.account_name }}{% if t.account_mask %} ••{{ t.account_mask }}{% endif %}</dd></div>
+      <div><dt>Amount</dt><dd>{{ (t.amount|abs)|money }} · <a href="/transactions?amount={{ '%.2f'|format(t.amount|abs) }}">Others with this amount</a></dd></div>
+      <div><dt>From</dt><dd>{{ {"plaid": "your bank (Plaid)", "copilot": "Copilot import", "manual": "manual entry", "split": "a split", "group": "transactions you combined"}[t.source] }}</dd></div>
+    </dl>
+  </section>
+
+  {% if t.plaid_transaction_id or t.original_name or bank %}
+    {# What the bank sent through Plaid (sync._details), kept as it was; only what the bank filled in shows. #}
+    <section class="card details-list">
+      <h2>From your bank</h2>
+      <dl>
+        {% if t.original_name %}<div><dt>Description</dt><dd>{{ t.original_name }}</dd></div>{% endif %}
+        {% if bank.bank_name and bank.bank_name != t.original_name %}<div><dt>Name</dt><dd>{{ bank.bank_name }}</dd></div>{% endif %}
+        {% if bank.merchant %}<div><dt>Merchant</dt><dd>{{ bank.merchant }}{% if bank.website %} · {{ bank.website }}{% endif %}</dd></div>
+        {% elif bank.website %}<div><dt>Website</dt><dd>{{ bank.website }}</dd></div>{% endif %}
+        {% if bank.made %}<div><dt>Made</dt><dd>{{ bank.made|day_label }}{% if bank.time %}, {{ bank.time }}{% endif %}</dd></div>{% endif %}
+        {% if bank.posted %}<div><dt>Posted</dt><dd>{{ bank.posted|day_label }}</dd></div>{% endif %}
+        {% if bank.channel %}<div><dt>Paid</dt><dd>{{ {"in store": "In store", "online": "Online", "other": "Other"}.get(bank.channel, bank.channel) }}</dd></div>{% endif %}
+        {% if bank.code %}<div><dt>The bank's type</dt><dd>{{ bank.code|capitalize }}</dd></div>{% endif %}
+        {% if bank.where or bank.store %}<div><dt>Where</dt><dd>{{ bank.where }}{% if bank.store %} (store {{ bank.store }}){% endif %}</dd></div>{% endif %}
+        {% for c in bank.counterparties or [] %}
+          <div><dt>{{ "Other side" if loop.first else "" }}</dt><dd>{{ c.name }}{% if c.type %} · {{ {"merchant": "merchant", "financial_institution": "bank", "payment_app": "payment app", "marketplace": "marketplace", "payment_terminal": "payment terminal", "income_source": "income source"}.get(c.type, c.type|replace("_", " ")) }}{% endif %}</dd></div>
+        {% endfor %}
+        {% if bank.processor %}<div><dt>Paid through</dt><dd>{{ bank.processor }}</dd></div>{% endif %}
+        {% if t.plaid_category %}<div><dt>Plaid's category</dt><dd>{{ t.plaid_category|plaid_label }}{% if bank.confidence %} · {{ bank.confidence|replace("_", " ")|lower }} confidence{% endif %}</dd></div>{% endif %}
+        {% if t.plaid_transaction_id %}<div><dt>Bank ID</dt><dd class="small muted">{{ t.plaid_transaction_id }}</dd></div>{% endif %}
+      </dl>
+    </section>
+  {% endif %}
+
+  {% if t.source == "manual" and not t.split_from_id %}
+    <form method="post" action="/transactions/{{ t.id }}/delete" data-confirm="Delete “{{ t.name }}”? This can't be undone.">
+      <input type="hidden" name="back" value="{{ back }}">
+      <button type="submit" class="danger">Delete this transaction</button>
+    </form>
+  {% endif %}
+</div>
+{% endblock %}

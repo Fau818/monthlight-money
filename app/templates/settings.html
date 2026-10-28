@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Settings</h1></div>
+
+<section class="card">
+  <h2>Plaid</h2>
+  <dl class="details-list">
+    <div><dt>Mode</dt><dd>{{ "Production (your real banks)" if settings.plaid_env == "production" else "Sandbox (fake test banks)" }}</dd></div>
+    <div><dt>Keys</dt><dd>{{ "Set" if settings.plaid_configured else "Missing. Add PLAID_CLIENT_ID and the secret for this mode to .env, then restart." }}</dd></div>
+    <div><dt>Automatic sync</dt><dd>{% if settings.sync_interval_hours > 0 %}every {{ '%g'|format(settings.sync_interval_hours) }} hours while the app is running{% else %}off{% endif %}</dd></div>
+    <div><dt>Last sync</dt><dd>{{ last_synced|ago }}</dd></div>
+  </dl>
+  <p class="muted small">These come from the <code>.env</code> file. The keys are never shown here.</p>
+</section>
+
+<section class="card">
+  <h2>Your data</h2>
+  <p>{{ counts.transactions }} transactions, {{ counts.accounts }} accounts and {{ counts.rules }} rules, all stored on this computer, in <code>data/money.db</code>.</p>
+  <p>Daily backups: {% if backups.latest %}{{ backups.count }} {{ "copy" if backups.count == 1 else "copies" }}, the latest from {{ backups.latest }},{% else %}none yet,{% endif %} in the <code>backups</code> folder. The last 30 are kept.</p>
+  <p><a class="button" href="/export.csv">{{ icon("download") }} Download everything as CSV</a></p>
+  <p class="muted small">To restore a backup, follow “Backups” in <code>README.md</code>.</p>
+</section>
+
+<section class="card">
+  <h2>More</h2>
+  <ul class="link-list">
+    <li><a href="/categories">{{ icon("tag") }} Categories &amp; rules</a></li>
+    <li><a href="/import">{{ icon("download") }} Import from Copilot</a></li>
+  </ul>
+</section>
+{% endblock %}

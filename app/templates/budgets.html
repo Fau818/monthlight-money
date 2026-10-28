@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% from "_macros.html" import month_nav, meter, left_text, badge, icon with context %}
+{% block title %}Budgets{% endblock %}
+{% block content %}
+{{ month_nav("/budgets", month, prev_month, next_month, this_month, "&edit=1" if editing else "") }}
+
+<section class="card budget-summary">
+  <div class="spend-head">
+    <div>
+      <div class="label">Spent in {{ month|month_name }}</div>
+      {% set dollars, cents = totals.spent|money_parts %}
+      <div class="hero">{{ dollars }}<span class="cents">{{ cents }}</span></div>
+      {% if budget %}
+        <div class="spend-sub">
+          <span>{{ left_text(totals.spent, budget, "your " ~ budget|money ~ " budget") }}</span>
+          {% if days_left and totals.spent < budget %}<span class="muted">About {{ ((budget - totals.spent) / days_left)|money }} a day for the {{ plural(days_left, "day") }} left</span>{% endif %}
+        </div>
+      {% endif %}
+    </div>
+    {% if not editing %}<a class="button" href="/budgets?month={{ month }}&edit=1">Edit budgets</a>{% endif %}
+  </div>
+  {% if budget %}{{ meter(totals.spent, budget, "blue") }}{% endif %}
+</section>
+
+{% if editing %}
+  <form method="post" action="/budgets" class="card">
+    <input type="hidden" name="back" value="/budgets?month={{ month }}">
+    <p class="muted">Budgets are monthly and apply to every month. A group's budget covers its subcategories; leave it empty to add up the subcategories' budgets instead.</p>
+    <ul class="budget-edit">
+      {% for n in nodes %}
+        {% set look = transaction_look(looks, "regular", n.id) %}
+        <li class="group-row">
+          {{ badge(look) }}<span class="cat-name"><strong>{{ n.name }}</strong><span class="muted small">{{ n.spent|money }} spent</span></span>
+          {% if n.id %}<input class="money" name="budget_{{ n.id }}" value="{{ '%.2f'|format(n.budget) if n.budget else '' }}" inputmode="decimal" placeholder="{{ '%.2f'|format(n.total_budget) if n.total_budget else 'No budget' }}" aria-label="Budget for {{ n.name }}">{% endif %}
+        </li>
+        {% for ch in n.children %}
+          <li class="child-row">
+            {{ badge(transaction_look(looks, "regular", ch.id), "small") }}<span class="cat-name">{{ ch.name }}<span class="muted small">{{ ch.spent|money }} spent</span></span>
+            <input class="money" name="budget_{{ ch.id }}" value="{{ '%.2f'|format(ch.budget) if ch.budget else '' }}" inputmode="decimal" placeholder="No budget" aria-label="Budget for {{ ch.name }}">
+          </li>
+        {% endfor %}
+      {% endfor %}
+      {% if others %}
+        <li class="divider muted small">No spending this month</li>
+        {% for c in others %}
+          <li class="child-row">
+            {{ badge(transaction_look(looks, "regular", c.id), "small") }}<span class="cat-name">{{ c.name }}</span>
+            <input class="money" name="budget_{{ c.id }}" value="" inputmode="decimal" placeholder="No budget" aria-label="Budget for {{ c.name }}">
+          </li>
+        {% endfor %}
+      {% endif %}
+    </ul>
+    <div class="form-actions"><button type="submit" class="primary">Save budgets</button><a class="button" href="/budgets?month={{ month }}">Cancel</a></div>
+  </form>
+{% else %}
+  <section class="card">
+    {% if nodes %}
+      <ul class="cat-list budgets">
+        {% for n in nodes %}
+          {% set look = transaction_look(looks, "regular", n.id) %}
+          <li>
+            <a class="cat-row" href="/transactions?month={{ month }}&category={{ n.id if n.id else 'none' }}">
+              {{ badge(look) }}
+              <span class="cat-name">{{ n.name }}</span>
+              <span class="cat-amount">{{ n.spent|money }}{% if n.total_budget %}<span class="muted"> / {{ n.total_budget|money }}</span>{% endif %}</span>
+            </a>
+            {% if n.total_budget %}
+              {{ meter(n.spent, n.total_budget, look.color) }}
+              <div class="cat-sub">{{ left_text(n.spent, n.total_budget) }}</div>
+            {% endif %}
+            {% if n.children %}
+              <ul class="sub-list">
+                {% for ch in n.children %}
+                  {% set child_look = transaction_look(looks, "regular", ch.id) %}
+                  <li>
+                    <a class="cat-row" href="/transactions?month={{ month }}&category={{ ch.id }}">
+                      {{ badge(child_look, "small") }}
+                      <span class="cat-name">{{ ch.name }}</span>
+                      <span class="cat-amount">{{ ch.spent|money }}{% if ch.budget %}<span class="muted"> / {{ ch.budget|money }}</span>{% endif %}</span>
+                    </a>
+                    {% if ch.budget %}{{ meter(ch.spent, ch.budget, child_look.color) }}<div class="cat-sub">{{ left_text(ch.spent, ch.budget) }}</div>{% endif %}
+                  </li>
+                {% endfor %}
+              </ul>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="empty">No spending in {{ month|month_name }} yet. <a href="/budgets?month={{ month }}&edit=1">Set budgets</a> for the month ahead.</p>
+    {% endif %}
+  </section>
+{% endif %}
+{% endblock %}
