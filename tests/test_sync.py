@@ -355,7 +355,7 @@ def test_a_date_set_by_hand_survives_bank_updates(conn):
     fake = FakePlaid(pages={
         None: page([plaid_txn("p1", 12.0, "2026-10-08", "BLUE BOTTLE", pending=True), plaid_txn("t2", 20, "2026-10-02", "B")], "c1"),
         "c1": page([plaid_txn("t1", 14.5, "2026-10-09", "BLUE BOTTLE", pending_id="p1")], "c2", removed=["p1"],
-                   modified=[plaid_txn("t2", 21, "2026-10-03", "B")]),
+                   modified=[plaid_txn("t2", 21, "2026-10-01", "B")]),
     })
     link(conn, fake)
     sync.sync_item(conn, fake, "item-1")
@@ -365,7 +365,28 @@ def test_a_date_set_by_hand_survives_bank_updates(conn):
     sync.sync_item(conn, fake, "item-1")
     by_id = rows(conn)
     assert (by_id["t1"]["date"], by_id["t1"]["amount"], by_id["t1"]["pending"]) == ("2026-09-30", -14.5, 0)  # posted, still the user's date
-    assert (by_id["t2"]["date"], by_id["t2"]["amount"]) == ("2026-10-03", -21.0)  # not edited, so the bank's change applies
+    assert (by_id["t2"]["date"], by_id["t2"]["amount"]) == ("2026-10-01", -21.0)  # not edited, so the bank's change applies
+
+
+def test_a_sync_never_moves_a_date_later(conn):
+    later_purchase = plaid_txn("t3", 30.0, "2026-10-12", "SHOP", pending_id="p3")
+    later_purchase["authorized_date"] = "2026-10-10"
+    fake = FakePlaid(pages={
+        None: page([plaid_txn("p1", 12.0, "2026-10-08", "BLUE BOTTLE", pending=True),
+                    plaid_txn("p2", 9.0, "2026-10-08", "CORNER STORE", pending=True),
+                    plaid_txn("p3", 30.0, "2026-10-08", "SHOP", pending=True)], "c1"),
+        "c1": page([plaid_txn("t1", 12.0, "2026-10-11", "BLUE BOTTLE", pending_id="p1"), later_purchase], "c2",
+                   removed=["p1", "p3"], modified=[plaid_txn("p2", 9.0, "2026-10-09", "CORNER STORE", pending=True)]),
+        "c2": page([], "c3", modified=[plaid_txn("t1", 12.5, "2026-10-11", "BLUE BOTTLE")]),
+    })
+    link(conn, fake)
+    for _ in range(3):
+        sync.sync_item(conn, fake, "item-1")
+    by_id = rows(conn)
+    # The bank's update after the posting changes the amount, not the day.
+    assert (by_id["t1"]["date"], by_id["t1"]["amount"]) == ("2026-10-08", -12.5)
+    assert by_id["p2"]["date"] == "2026-10-08"  # a pending row the bank dates a day later
+    assert by_id["t3"]["date"] == "2026-10-08"  # a purchase date after the pending day
 
 
 def test_the_two_sides_of_a_move_are_linked(conn):

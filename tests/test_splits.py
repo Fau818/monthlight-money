@@ -418,7 +418,7 @@ def test_a_part_is_dated_like_its_split(client, settings):
 def test_parts_move_with_their_split_when_the_bank_moves_it(conn):
     fake = FakePlaid(pages={
         None: page([plaid_txn("dinner", 50.0, "2026-10-08", "DINNER")], "c1"),
-        "c1": page([], "c2", modified=[plaid_txn("dinner", 50.0, "2026-10-09", "DINNER")]),
+        "c1": page([], "c2", modified=[plaid_txn("dinner", 50.0, "2026-10-06", "DINNER")]),
     })
     sync.link_item(conn, fake, "public-sandbox-1", {"institution_id": "ins_1", "name": "Tartan"})
     sync.sync_item(conn, fake, "item-1")
@@ -431,8 +431,8 @@ def test_parts_move_with_their_split_when_the_bank_moves_it(conn):
                            (dinner["account_id"],)).lastrowid
         conn.execute("UPDATE transactions SET split_from_id = ? WHERE id = ?", (dinner["id"], old))
     assert {p["date"] for p in splits.parts_of(conn, dinner["id"])} == {"2026-10-08"}
-    sync.sync_item(conn, fake, "item-1")
-    assert {p["date"] for p in splits.parts_of(conn, dinner["id"])} == {"2026-10-09"}
+    sync.sync_item(conn, fake, "item-1")  # the bank dates it two days earlier
+    assert {p["date"] for p in splits.parts_of(conn, dinner["id"])} == {"2026-10-06"}
 
 
 def test_a_transaction_gets_its_own_date_back_when_it_leaves(conn):

@@ -21,7 +21,7 @@ New transactions wait on **Dashboard → To review** and **Transactions → To r
 
 ## Editing a transaction
 
-Click a transaction to open it in a panel over the list; the list stays where it was when you save or close it. A transaction's date is the day you spent the money, not the day it posted. A date you set by hand stays, even when your bank updates the transaction later.
+Click a transaction to open it in a panel over the list; the list stays where it was when you save or close it. A transaction's date is the day you spent the money, not the day it posted, and your bank's updates never move it to a later day. A date you set by hand stays, whatever the bank says later.
 
 ## Leaving something out of spending
 

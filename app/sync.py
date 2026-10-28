@@ -298,9 +298,9 @@ def _link_to_history(conn: sqlite3.Connection, account_id: int, t: dict, day: da
     return True
 
 
-def _update_existing(conn: sqlite3.Connection, t: dict, lookup_id: str, categorizer: Categorizer, posting: bool = False) -> bool:
-    """Updates the row Plaid knows as `lookup_id` from transaction `t`, which is that row's pending version posting
-    when `posting`; returns False if there's no such row."""
+def _update_existing(conn: sqlite3.Connection, t: dict, lookup_id: str, categorizer: Categorizer) -> bool:
+    """Updates the row Plaid knows as `lookup_id` from transaction `t`, the same transaction again or its pending
+    version posting; returns False if there's no such row."""
     row = conn.execute(
         """SELECT t.id, t.user_edited, t.source, t.amount, a.type AS account_type,
                   EXISTS (SELECT 1 FROM transactions s WHERE s.split_from_id = t.id) AS split
@@ -315,12 +315,11 @@ def _update_existing(conn: sqlite3.Connection, t: dict, lookup_id: str, categori
         "date": _txn_date(t).isoformat(), "pending": int(bool(t.get("pending"))),
         "original": t.get("original_description") or t.get("name"), "pfc": _plaid_category(t),
         "logo": t.get("logo_url"), "name": _display_name(t), "details": _details(t),
-        # The user's date is the day the money was spent: when a pending transaction posts without a purchase date
-        # (authorized_date), it keeps the pending day if that's the earlier one. A charge posts days after it was made,
-        # but some banks date a transfer's posting a day before it showed as pending.
-        "keep": int(posting and not t.get("authorized_date")),
     }
     # A date the user set by hand stays, even when the bank moves it (a pending charge can post on another day).
+    # Otherwise a sync never moves the date later: it's the day the money was spent, so a charge keeps its pending day
+    # when it posts and through every later update or re-sync. An earlier day still wins: some banks date a transfer's
+    # posting a day before it showed as pending.
     if row["source"] == "copilot":
         # Imported history keeps its own date, amount and name; only Plaid's details are added.
         conn.execute("UPDATE transactions SET plaid_transaction_id = :pid, plaid_category = :pfc, logo_url = :logo, plaid_details = :details "
@@ -328,7 +327,7 @@ def _update_existing(conn: sqlite3.Connection, t: dict, lookup_id: str, categori
     elif row["user_edited"]:
         conn.execute(
             """UPDATE transactions SET plaid_transaction_id = :pid, amount = :amount, pending = :pending,
-                      date = CASE WHEN date_edited THEN date WHEN :keep THEN min(date, :date) ELSE :date END,
+                      date = CASE WHEN date_edited THEN date ELSE min(date, :date) END,
                       original_name = :original, plaid_category = :pfc, logo_url = :logo, plaid_details = :details
                WHERE id = :id""",
             fields,
@@ -338,7 +337,7 @@ def _update_existing(conn: sqlite3.Connection, t: dict, lookup_id: str, categori
             fields["name"], fields["original"], fields["pfc"], _plaid_confidence(t), row["account_type"])
         conn.execute(
             """UPDATE transactions SET plaid_transaction_id = :pid, amount = :amount, pending = :pending,
-                      date = CASE WHEN date_edited THEN date WHEN :keep THEN min(date, :date) ELSE :date END,
+                      date = CASE WHEN date_edited THEN date ELSE min(date, :date) END,
                       name = :name, original_name = :original, plaid_category = :pfc, logo_url = :logo, plaid_details = :details,
                       category_id = :category, type = :type
                WHERE id = :id""",
@@ -381,7 +380,7 @@ def _apply_transactions(conn: sqlite3.Connection, item_id: str, updates: dict, f
         if account is None:
             continue
         if _update_existing(conn, t, t["transaction_id"], categorizer) or (
-            t.get("pending_transaction_id") and _update_existing(conn, t, t["pending_transaction_id"], categorizer, posting=True)
+            t.get("pending_transaction_id") and _update_existing(conn, t, t["pending_transaction_id"], categorizer)
         ):
             result.updated += 1
             continue
