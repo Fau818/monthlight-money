@@ -31,15 +31,29 @@ def scale(values: list[float], zero: bool = True, parts: int = 3) -> dict:
     return {"low": low, "high": high, "ticks": ticks}
 
 
-def compact_money(value: float) -> str:
-    """Returns a short dollar amount for an axis or a chart label, e.g. "$0", "$750", "$1.5K", "$12K", "-$2.5M"."""
+def compact_money(value: float, digits: int | None = None) -> str:
+    """Returns a short dollar amount for an axis or a chart label, e.g. "$0", "$750", "$1.5K", "$12K", "-$2.5M"; with
+    `digits`, thousands and millions get that many decimals, like "$16.25K"."""
     sign, value = ("-" if value < 0 else ""), abs(value)
     for size, suffix in ((1_000_000, "M"), (1_000, "K")):
         if value >= size:
             number = value / size
-            text = f"{number:.1f}".removesuffix(".0") if number < 10 else f"{number:.0f}"
+            if digits is not None:
+                text = f"{number:.{digits}f}"
+            else:
+                text = f"{number:.1f}".removesuffix(".0") if number < 10 else f"{number:.0f}"
             return f"{sign}${text}{suffix}"
     return f"{sign}${value:,.0f}"
+
+
+def label_digits(ticks: list[float]) -> int | None:
+    """Returns how many decimals the labels of an axis's evenly spaced `ticks` need: None when compact_money's own
+    rounding tells them apart, else as many as the step between them takes (2 for ticks $250 apart above $10K)."""
+    if len({compact_money(t) for t in ticks}) == len(ticks):
+        return None
+    unit = 1_000_000 if max(abs(t) for t in ticks) >= 1_000_000 else 1_000
+    step = f"{(ticks[1] - ticks[0]) / unit:.6f}".rstrip("0")
+    return len(step.split(".")[1])
 
 
 def x_percent(index: int, count: int) -> float:
@@ -66,6 +80,7 @@ def line_chart(labels: list[str], series: list[dict], zero: bool = True, markers
     count = len(labels)
     axis = scale([v for s in series for v in s["values"]] + [m["value"] for m in markers], zero=zero)
     low, high = axis["low"], axis["high"]
+    digits = label_digits(axis["ticks"])  # NOTE: the last point's label too, so it reads like the axis beside it
     drawn = []
     for s in series:
         values = s["values"]
@@ -76,11 +91,12 @@ def line_chart(labels: list[str], series: list[dict], zero: bool = True, markers
             area = f"M0,{base:.1f} L{points.replace(' ', ' L')} L{x_percent(len(values) - 1, count) * WIDTH / 100:.1f},{base:.1f} Z"
         end = None
         if values:
-            end = {"left": x_percent(len(values) - 1, count), "top": y_percent(values[-1], low, high), "value": values[-1]}
+            end = {"left": x_percent(len(values) - 1, count), "top": y_percent(values[-1], low, high), "value": values[-1],
+                   "label": compact_money(values[-1], digits)}
         drawn.append({**s, "points": points, "area_path": area, "end": end})
     return {
         "count": count, "low": low, "high": high,
-        "ticks": [{"label": compact_money(t), "top": y_percent(t, low, high)} for t in axis["ticks"]],
+        "ticks": [{"label": compact_money(t, digits), "top": y_percent(t, low, high)} for t in axis["ticks"]],
         "series": drawn,
         "markers": [{**m, "top": y_percent(m["value"], low, high)} for m in markers],
         "hover": {"labels": labels, "low": low, "high": high,
@@ -92,9 +108,9 @@ def bar_heights(values: list[float]) -> dict:
     """Returns {"high", "ticks", "heights"} for a column chart of `values`: a round top for the axis, its ticks with
     their positions, and each column's height as a percentage of the plot (0 for anything not above zero)."""
     axis = scale([max(v, 0.0) for v in values])
-    high = axis["high"]
+    high, digits = axis["high"], label_digits(axis["ticks"])
     return {
         "high": high,
-        "ticks": [{"label": compact_money(t), "top": y_percent(t, 0.0, high)} for t in axis["ticks"]],
+        "ticks": [{"label": compact_money(t, digits), "top": y_percent(t, 0.0, high)} for t in axis["ticks"]],
         "heights": [max(0.0, v) / high * 100 for v in values],
     }

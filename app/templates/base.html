@@ -5,11 +5,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#041222" media="(prefers-color-scheme: dark)">
+  <meta name="apple-mobile-web-app-title" content="Monthlight">
   <title>{% block title %}Monthlight{% endblock %}</title>
+  <link rel="icon" href="/favicon.ico" sizes="32x32">
+  <link rel="icon" href="/static/icon.svg?v={{ static_version }}" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <link rel="stylesheet" href="/static/style.css?v={{ static_version }}">
   <script>document.documentElement.classList.add("js")</script>
 </head>
 <body>
+  <a class="skip" href="#main">Skip to content</a>
   {% macro nav_link(href, label, name, cls="") -%}
     {% set path = request.url.path %}
     {% set active = path == href or (href != "/" and path.startswith(href)) %}
@@ -20,24 +27,52 @@
   {%- endmacro %}
 
   <aside class="sidebar">
-    <a class="brand" href="/"><span class="logo" aria-hidden="true">$</span>Monthlight</a>
+    <a class="brand" href="/"><img class="logo" src="/static/icon.svg?v={{ static_version }}" alt="" width="28" height="28">Monthlight</a>
+    {# On the transactions page it searches within the filters picked there, whose own search field shows only on a
+       phone, where there's no sidebar. #}
+    <form method="get" action="/transactions" class="side-search" role="search">
+      {{ icon("search") }}
+      <input type="search" name="q" value="{{ filters.q if filters is defined else '' }}" placeholder="Search" aria-label="Search transactions" autocomplete="off">
+      {% if filters is defined %}{% for key, value in filters.items() if key != "q" %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}{% endif %}
+    </form>
     <nav aria-label="Main">
       {% for href, label, name in nav %}{{ nav_link(href, label, name) }}{% endfor %}
     </nav>
-    <nav class="secondary" aria-label="More">
-      {% for href, label, name in more_nav %}{{ nav_link(href, label, name) }}{% endfor %}
-    </nav>
-    {% if settings.plaid_configured %}
-      <form method="post" action="/sync" class="sync">
-        <input type="hidden" name="back" value="{{ here }}">
-        <button type="submit" data-busy="Syncing…">{{ icon("sync") }} Sync now</button>
-        <span class="muted small">{% if last_synced %}Updated {{ last_synced|ago }}{% else %}Not synced yet{% endif %}</span>
-      </form>
+    {% if side_groups %}
+      {# Accounts in use, by group, as the Accounts page shows their balances; each opens its transactions. #}
+      <section class="side-accounts" aria-labelledby="side-accounts-head">
+        <h2 id="side-accounts-head">My accounts</h2>
+        {% for g in side_groups %}
+          <details data-group="{{ g.kind }}"{% if not g.folded %} open{% endif %}>
+            <summary><span class="chev">{{ icon("right") }}</span><span>{{ g.label }}</span><span class="num">{{ g.balance|money }}</span></summary>
+            <ul>
+              {% for a in g.accounts %}
+                {% set active = filters is defined and filters.account == a.id|string %}
+                <li><a href="/transactions?account={{ a.id }}"{% if active %} class="active" aria-current="page"{% endif %}
+                       title="{{ a.name }}{% if a.mask %} ••{{ a.mask }}{% endif %}{% if a.institution %} at {{ a.institution }}{% endif %}">
+                  <span>{{ a.label }}</span><span class="num">{{ a.balance|money }}</span></a></li>
+              {% endfor %}
+            </ul>
+          </details>
+        {% endfor %}
+      </section>
     {% endif %}
+    <div class="side-foot">
+      <nav aria-label="More">
+        {% for href, label, name in more_nav %}{{ nav_link(href, label, name) }}{% endfor %}
+      </nav>
+      {% if settings.plaid_configured %}
+        <form method="post" action="/sync" class="side-sync">
+          <input type="hidden" name="back" value="{{ here }}">
+          <button type="submit" data-busy="Syncing…" title="{% if last_synced %}Updated {{ last_synced|ago }}{% else %}Not synced yet{% endif %}">
+            {{- icon("sync") }}<span data-busy-label>Sync now</span>{% if last_synced %}<span class="when">{{ last_synced|ago }}</span>{% endif %}</button>
+        </form>
+      {% endif %}
+    </div>
   </aside>
 
   <header class="topbar">
-    <a class="brand" href="/"><span class="logo" aria-hidden="true">$</span>Monthlight</a>
+    <a class="brand" href="/"><img class="logo" src="/static/icon.svg?v={{ static_version }}" alt="" width="28" height="28">Monthlight</a>
     {% if settings.plaid_configured %}
       <form method="post" action="/sync" class="sync">
         <input type="hidden" name="back" value="{{ here }}">
@@ -50,7 +85,7 @@
     </details>
   </header>
 
-  <main>
+  <main id="main">
     {% if settings.plaid_configured and settings.plaid_env == "sandbox" %}
       <p class="notice">Test mode: connected banks are Plaid's fake Sandbox banks. Set <code>PLAID_ENV=production</code> in <code>.env</code> to use your real banks.</p>
     {% endif %}

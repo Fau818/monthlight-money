@@ -689,6 +689,43 @@ def test_accounts_can_be_added_archived_or_hidden_and_the_picker_follows(client,
     conn.close()
 
 
+def test_the_sidebar_lists_the_accounts_in_use_by_group(client, settings):
+    import_sample(client, settings)
+    conn = sync.connect(settings.db_path)
+    with conn:
+        conn.execute("UPDATE accounts SET balance = 2000 WHERE name = 'Acme Checking'")
+        conn.execute("UPDATE accounts SET balance = 120.5 WHERE name = 'Chase Sapphire'")
+        other = conn.execute("INSERT INTO accounts (name, type, mask, source, balance) VALUES ('Chase Sapphire', 'credit', '5555', 'copilot', 30)").lastrowid
+    checking = conn.execute("SELECT id FROM accounts WHERE name = 'Acme Checking'").fetchone()[0]
+    sidebar = lambda path="/": unescape(client.get(path).text).split('<aside class="sidebar">')[1].split("</aside>")[0]
+    shown = sidebar()
+    # Each group shows what its accounts add up to, as banks show balances; a name two of them share gets their digits.
+    assert shown.index("Cash") < shown.index("$2,000.00") < shown.index("Credit cards") < shown.index("$150.50")
+    assert "Chase Sapphire ••1234" in shown and "Chase Sapphire ••5555" in shown
+    # The account open in the list is lit up, and searching from there keeps the list's filters.
+    listing = sidebar(f"/transactions?account={checking}&month=2026-09")
+    assert f'<a href="/transactions?account={checking}" class="active" aria-current="page"' in listing
+    assert f'<input type="hidden" name="month" value="2026-09"><input type="hidden" name="account" value="{checking}">' in listing
+    assert '<input type="hidden"' not in sidebar("/budgets").split('class="side-search"')[1].split("</form>")[0]  # elsewhere it searches everything
+    # A group stays folded from page to page: app.js keeps the folded ones in a cookie.
+    client.cookies.set("sidebar_folded", "credit")
+    assert '<details data-group="credit">' in sidebar() and '<details data-group="depository" open>' in sidebar()
+    # Archived and hidden accounts aren't listed, nor a group left with none.
+    client.post(f"/accounts/{checking}", data={"name": "Acme Checking", "archived": "1"})
+    client.post(f"/accounts/{other}", data={"name": "Chase Sapphire", "hidden": "1"})
+    shown = sidebar()
+    assert 'data-group="depository"' not in shown and '<span>Chase Sapphire</span><span class="num">$120.50</span>' in shown
+    conn.close()
+
+
+def test_browsers_and_phones_find_the_app_icon(client):
+    page_text = client.get("/").text
+    assert '<link rel="icon" href="/favicon.ico" sizes="32x32">' in page_text and '<link rel="apple-touch-icon" href="/apple-touch-icon.png">' in page_text
+    for path, kind in (("/favicon.ico", "image/"), ("/apple-touch-icon.png", "image/png"), ("/static/icon.svg", "image/svg+xml")):
+        response = client.get(path)
+        assert response.status_code == 200 and response.headers["content-type"].startswith(kind), path
+
+
 def test_odd_values_typed_into_a_url_are_ignored(client):
     for query in ("category=abc", "account=abc", "page=99999999999999999999", "category=1%20OR%201", "account=-1"):
         assert client.get(f"/transactions?{query}").status_code == 200, query

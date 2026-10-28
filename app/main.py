@@ -10,6 +10,7 @@ import math
 import os
 import sqlite3
 import threading
+from collections import Counter
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
 from itertools import pairwise
@@ -17,7 +18,7 @@ from pathlib import Path
 from urllib.parse import quote, unquote, urlencode, urlsplit
 
 from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -36,6 +37,7 @@ NAV = [
     ("/recurring", "Recurring", "repeat"), ("/accounts", "Accounts", "bank"),
 ]
 MORE_NAV = [("/categories", "Categories & rules", "tag"), ("/import", "Import", "download"), ("/settings", "Settings", "sliders")]
+FOLDED_COOKIE = "sidebar_folded"  # the account groups folded in the sidebar, by kind: "credit,loan" (app.js sets it)
 PAGE_SIZE = 200
 # How long before a bank's access through Plaid expires to start asking for a fresh login. Many US banks ask
 # for one every 12 months.
@@ -203,6 +205,7 @@ def render(request: Request, conn, template: str, **context) -> Response:
         "looks": looks.category_looks(conn), "tag_looks": tags.tag_looks(conn),
         "review_count": conn.execute(f"SELECT count(*) FROM transactions t WHERE t.reviewed = 0 OR {reports.SPLIT_OFF}").fetchone()[0],
         "last_synced": conn.execute("SELECT max(last_synced_at) FROM plaid_items").fetchone()[0],
+        "side_groups": sidebar_groups(conn, set((request.cookies.get(FOLDED_COOKIE) or "").split(","))),
         **context,
     })
     if raw:
@@ -353,6 +356,16 @@ def create_app(settings: Settings) -> FastAPI:
 
 def register_routes(app: FastAPI) -> None:
     settings: Settings = app.state.settings
+
+    # ---- the app's icon, where browsers and phones look for it ----
+
+    @app.get("/favicon.ico")
+    def favicon():
+        return FileResponse(HERE / "static" / "favicon.ico")
+
+    @app.get("/apple-touch-icon.png")
+    def home_screen_icon():
+        return FileResponse(HERE / "static" / "apple-touch-icon.png")
 
     # ---- dashboard ----
 
@@ -1348,6 +1361,23 @@ def _linked_day(r: str, own: str = "") -> str:
 SHOWN_DAY = f"""CASE WHEN t.type = 'transfer' AND t.amount > 0 AND ot.id IS NOT NULL THEN ot.date
                      WHEN p.id IS NOT NULL THEN {_linked_day('p')} WHEN sp.id IS NOT NULL THEN {_linked_day('sp', 't')}
                      ELSE {_linked_day('t')} END"""
+
+
+def sidebar_groups(conn, folded: set[str]) -> list[dict]:
+    """Returns the sidebar's accounts by group: each group's "kind", "label", "balance", whether it's "folded" (its kind
+    is in `folded`), and its "accounts" in use (not hidden or archived), with their balances shown the way the Accounts
+    page shows them. Each account's "label" is its name, with its last digits when another one has the same name."""
+    groups = []
+    for g in reports.net_worth(conn)["groups"]:
+        shown = [a for a in g["accounts"] if not a["hidden"] and not a["archived"]]
+        known = [a["balance"] for a in shown if a["balance"] is not None]
+        if shown:  # NOTE: its balance adds up what's listed; the Accounts page's counts archived accounts too
+            groups.append({"kind": g["kind"], "label": g["label"], "folded": g["kind"] in folded, "accounts": shown,
+                           "balance": round(sum(known), 2) if known else None})
+    names = Counter(a["name"] for g in groups for a in g["accounts"])
+    for a in (a for g in groups for a in g["accounts"]):
+        a["label"] = f"{a['name']} ••{a['mask']}" if names[a["name"]] > 1 and a["mask"] else a["name"]
+    return groups
 
 
 def find_transactions(conn, *, limit: int = PAGE_SIZE, offset: int = 0, **criteria) -> tuple[list[dict], int]:

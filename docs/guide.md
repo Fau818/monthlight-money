@@ -15,6 +15,10 @@ Run these in the project folder.
 
 The app restarts on its own whenever Docker is running. While it runs, it syncs your banks every 6 hours, and **Sync now** syncs them right away. If the computer was off, the next sync catches up.
 
+## Finding things
+
+The search field at the top of the sidebar looks through names and notes; on **Transactions** it searches within the filters you picked there. Below the pages, the sidebar lists your accounts by group with their balances: click one to see its transactions, or fold a group away. Hidden and archived accounts aren't listed. On a phone, **Transactions** has its own search field.
+
 ## Reviewing new transactions
 
 New transactions wait on **Dashboard → To review** and **Transactions → To review**. Pick the right category, or press ✓ if it's already right. When you change a category, the app offers to do the same for every transaction with that name, now and later.

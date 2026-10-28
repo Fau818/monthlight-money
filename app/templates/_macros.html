@@ -178,7 +178,7 @@
       </svg>
       {% for s in chart.series if s.end %}
         <span class="end-dot role-{{ s.role }}" style="left: {{ s.end.left }}%; top: {{ s.end.top }}%"></span>
-        {% if s.role == "main" and not compact %}<span class="end-label{% if s.end.left < 30 %} right{% endif %}" style="left: {{ s.end.left }}%; top: {{ s.end.top }}%">{{ s.end.value|compact_money }}</span>{% endif %}
+        {% if s.role == "main" and not compact %}<span class="end-label{% if s.end.left < 30 %} right{% endif %}" style="left: {{ s.end.left }}%; top: {{ s.end.top }}%">{{ s.end.label }}</span>{% endif %}
       {% endfor %}
       <div class="crosshair" hidden></div>
       {% for s in chart.series %}<span class="hover-dot role-{{ s.role }}" hidden></span>{% endfor %}

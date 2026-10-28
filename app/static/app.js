@@ -26,21 +26,28 @@ document.addEventListener("submit", (event) => {
     event.preventDefault();
     return;
   }
-  // Show progress on slow buttons (sync, import) and prevent double submits.
+  // Show progress on slow buttons (sync, import) and prevent double submits. A button with a label beside its icon
+  // changes only the label.
   const button = event.submitter;
   if (button && button.dataset.busy) {
-    button.textContent = button.dataset.busy;
+    (button.querySelector("[data-busy-label]") || button).textContent = button.dataset.busy;
     setTimeout(() => { button.disabled = true; }, 0);
   }
 });
 
 // Puts the page `page` (parsed HTML from `url`) in place of this one's content, keeping the scroll position. The
-// navigation shows how many transactions are waiting for review, so it's replaced too.
+// navigation shows how many transactions are waiting for review, and the sidebar the accounts' balances, so they're
+// replaced too, keeping the sidebar's scroll position.
 function swapIn(page, url) {
+  const scrolled = [".sidebar", ".side-accounts"].map((part) => document.querySelector(part)?.scrollTop || 0);
   for (const part of ["main", ".sidebar", ".topbar", ".tabbar"]) {
     const fresh = page.querySelector(part);
     if (fresh) document.querySelector(part).replaceWith(fresh);
   }
+  [".sidebar", ".side-accounts"].forEach((part, i) => {
+    const fresh = document.querySelector(part);
+    if (fresh) fresh.scrollTop = scrolled[i];
+  });
   document.title = page.title;
   history.replaceState(history.state, "", url);
   startToast();
@@ -190,6 +197,14 @@ document.addEventListener("click", (event) => {
   void target.offsetWidth;  // restart the animation
   target.classList.add("flash");
 });
+
+// The sidebar's account groups stay folded or open from page to page: the server reads which are folded from a cookie.
+// NOTE: toggle events don't bubble, so this listens as they go down to the group.
+document.addEventListener("toggle", (event) => {
+  if (!event.target.matches || !event.target.matches("details[data-group]")) return;
+  const folded = [...document.querySelectorAll("details[data-group]:not([open])")].map((group) => group.dataset.group);
+  document.cookie = `sidebar_folded=${folded.join(",")}; path=/; max-age=31536000; samesite=lax`;
+}, true);
 
 // Close the phone's More menu when tapping elsewhere.
 document.addEventListener("click", (event) => {
