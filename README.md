@@ -12,14 +12,14 @@ It's inspired by [Copilot Money](https://copilot.money) (and not affiliated with
 ## Features
 
 - **Dashboard:** this month's spending day by day next to last month's, budgets, transactions to review, upcoming bills and net worth.
-- **Transactions:** search and filters, categories picked right in the list, rules, splits, tags, and paybacks from friends.
+- **Transactions:** one line each, month by month, with the one you pick open beside the list. Search and filters, categories picked right in the list, rules, splits, tags, and paybacks from friends.
 - **Budgets and recurring charges**, with what's left this month.
 - **Accounts:** balances, card limits and net worth over time.
 - **Your data stays with you:** one SQLite file, a backup every day, and a CSV export.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/transactions-dark.png">
-  <img alt="Transactions grouped by day, with an order split into its parts" src="docs/images/transactions-light.png">
+  <img alt="Transactions by month and day, with an order split into its parts, and a transaction open beside the list" src="docs/images/transactions-light.png">
 </picture>
 
 ## Getting started
