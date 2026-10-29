@@ -1,4 +1,4 @@
-"""Choosing a category and type for incoming transactions: the user's rules first, then Plaid's category."""
+"""Choosing a name, category and type for incoming transactions: the user's rules first, then Plaid's category."""
 
 import re
 import sqlite3
@@ -154,6 +154,7 @@ class Rule:
     match: str
     category_id: int | None
     type: str | None
+    rename_to: str | None = None
 
     def matches(self, *names: str | None) -> bool:
         for name in names:
@@ -168,27 +169,34 @@ class Rule:
 
 
 class Categorizer:
-    """Picks a category and type for new transactions; loads the rules and the Plaid map once."""
+    """Picks a name, category and type for new transactions; loads the rules and the Plaid map once."""
 
     def __init__(self, conn: sqlite3.Connection):
-        rows = conn.execute("SELECT id, pattern, match, category_id, type FROM rules").fetchall()
+        rows = conn.execute("SELECT id, pattern, match, category_id, type, rename_to FROM rules").fetchall()
         # Exact matches win over "contains" rules, and longer patterns over shorter ones.
         self.rules = sorted(
-            (Rule(r["id"], r["pattern"], r["match"], r["category_id"], r["type"]) for r in rows),
+            (Rule(r["id"], r["pattern"], r["match"], r["category_id"], r["type"], r["rename_to"]) for r in rows),
             key=lambda r: (r.match != "equals", -len(r.pattern)),
         )
         self.plaid_map = dict(conn.execute("SELECT plaid_category, category_id FROM plaid_category_map").fetchall())
 
-    def rule_for(self, name: str | None, original_name: str | None) -> Rule | None:
-        """Returns the first rule matching either name, or None."""
-        return next((r for r in self.rules if r.matches(name, original_name)), None)
+    def rule_for(self, *names: str | None, sets: str | None = None) -> Rule | None:
+        """Returns the first rule matching any of the names, or None; with `sets`, the first one that sets that part
+        ("category_id", "type" or "rename_to"), so a rule that leaves a part as it is lets the next one decide it."""
+        return next((r for r in self.rules if r.matches(*names) and (sets is None or getattr(r, sets))), None)
+
+    def rename(self, *names: str | None) -> str | None:
+        """Returns the name a rule gives transactions with any of these names, or None when none renames them."""
+        rule = self.rule_for(*names, sets="rename_to")
+        return rule.rename_to if rule else None
 
     def categorize(self, name: str | None, original_name: str | None, plaid_category: str | None,
-                   confidence: str | None = None, account_type: str | None = None) -> tuple[int | None, str]:
-        """Returns (category_id, type) for a transaction with these names and Plaid category, on an account of
-        `account_type`. Plaid's category is used only at `confidence` HIGH or VERY_HIGH; the type it implies
-        (income, transfer) is used regardless. Income and transfers get no category, and everything on a loan
-        account is a transfer, whatever the rules say."""
+                   confidence: str | None = None, account_type: str | None = None, *,
+                   also: tuple[str | None, ...] = ()) -> tuple[int | None, str]:
+        """Returns (category_id, type) for a transaction with these names (and the other names in `also`, like the
+        bank's own) and Plaid category, on an account of `account_type`. Plaid's category is used only at `confidence`
+        HIGH or VERY_HIGH; the type it implies (income, transfer) is used regardless. Income and transfers get no
+        category, and everything on a loan account is a transfer, whatever the rules say."""
         if account_type == "loan":
             # A loan account shows the other side of payments made from a bank account, which count as spending
             # there, and the interest those payments cover.
@@ -198,41 +206,60 @@ class Categorizer:
         # An app transfer such as Zelle says nothing about what it paid for, so its category can only come from a rule.
         if type_ == "regular" and plaid_category not in APP_TRANSFERS and confidence in CONFIDENT:
             category = self.plaid_map.get(plaid_category) or self.plaid_map.get(plaid_primary(plaid_category))
-        rule = self.rule_for(name, original_name)
-        if rule:
-            if rule.type:
-                type_ = rule.type
-            if rule.category_id is not None:
-                category = rule.category_id
+        names = (name, original_name, *also)
+        if rule := self.rule_for(*names, sets="type"):
+            type_ = rule.type
+        if rule := self.rule_for(*names, sets="category_id"):
+            category = rule.category_id
         return (category if type_ == "regular" else None), type_
 
 
-def add_rule(conn: sqlite3.Connection, pattern: str, match: str, category_id: int | None, type_: str | None) -> int:
-    """Creates a rule, or replaces the one with the same pattern and match type. Returns the rule's id."""
+def add_rule(conn: sqlite3.Connection, pattern: str, match: str, category_id: int | None, type_: str | None,
+             rename_to: str | None = None) -> int:
+    """Creates a rule, or replaces the one with the same pattern and match type; a rule that already renames keeps its
+    new name unless given one. Returns the rule's id."""
     pattern = pattern.strip().lower()
     conn.execute(
-        "INSERT INTO rules (pattern, match, category_id, type) VALUES (?, ?, ?, ?) "
-        "ON CONFLICT (pattern, match) DO UPDATE SET category_id = excluded.category_id, type = excluded.type",
-        (pattern, match, category_id, type_),
+        "INSERT INTO rules (pattern, match, category_id, type, rename_to) VALUES (?, ?, ?, ?, ?) "
+        "ON CONFLICT (pattern, match) DO UPDATE SET category_id = excluded.category_id, type = excluded.type, "
+        "rename_to = coalesce(excluded.rename_to, rename_to)",
+        (pattern, match, category_id, type_, (rename_to or "").strip() or None),
     )
     return conn.execute("SELECT id FROM rules WHERE pattern = ? AND match = ?", (pattern, match)).fetchone()["id"]
 
 
+def add_rename(conn: sqlite3.Connection, old: str, new: str) -> int:
+    """Makes new transactions named `old` (any letter case) come named `new`, keeping what the rule for that name
+    already does to their category and type. Rules that renamed others to `old` rename them to `new` instead.
+    Returns the rule's id."""
+    pattern = old.strip().lower()
+    conn.execute("INSERT INTO rules (pattern, match, rename_to) VALUES (?, 'equals', ?) "
+                 "ON CONFLICT (pattern, match) DO UPDATE SET rename_to = excluded.rename_to", (pattern, new.strip()))
+    conn.execute("UPDATE rules SET rename_to = ? WHERE lower(rename_to) = ? AND pattern != ?", (new.strip(), pattern, pattern))
+    return conn.execute("SELECT id FROM rules WHERE pattern = ? AND match = 'equals'", (pattern,)).fetchone()["id"]
+
+
 def apply_rule(conn: sqlite3.Connection, rule_id: int) -> int:
-    """Applies a rule to existing transactions that weren't edited by hand, excluded, or on loan accounts (see
-    Categorizer.categorize). Returns how many changed."""
+    """Applies a rule to existing transactions, and returns how many changed:
+    - its category and type: to those not edited by hand, excluded, or on loan accounts (see Categorizer.categorize)
+    - its new name: to those not renamed by hand"""
     r = conn.execute("SELECT * FROM rules WHERE id = ?", (rule_id,)).fetchone()
     if r["match"] == "equals":
         where = "(lower(trim(name)) = :p OR lower(trim(coalesce(original_name, ''))) = :p)"
     else:
         where = "(instr(lower(name), :p) > 0 OR instr(lower(coalesce(original_name, '')), :p) > 0)"
-    cur = conn.execute(
+    values = {"p": r["pattern"], "cat": r["category_id"], "type": r["type"], "name": r["rename_to"]}
+    changed = {row[0] for row in conn.execute(
         f"""UPDATE transactions
             SET category_id = coalesce(:cat, category_id), type = coalesce(:type, type),
                 excluded = CASE WHEN coalesce(:type, type) = 'regular' THEN excluded ELSE 0 END
             WHERE user_edited = 0 AND excluded = 0 AND {where}
               AND account_id NOT IN (SELECT id FROM accounts WHERE type = 'loan')
-              AND (coalesce(category_id, -1) != coalesce(:cat, category_id, -1) OR type != coalesce(:type, type))""",
-        {"p": r["pattern"], "cat": r["category_id"], "type": r["type"]},
-    )
-    return cur.rowcount
+              AND (coalesce(category_id, -1) != coalesce(:cat, category_id, -1) OR type != coalesce(:type, type))
+            RETURNING id""",
+        values,
+    )}
+    if r["rename_to"]:
+        changed |= {row[0] for row in conn.execute(
+            f"UPDATE transactions SET name = :name WHERE name_edited = 0 AND {where} AND name != :name RETURNING id", values)}
+    return len(changed)

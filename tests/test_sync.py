@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app import copilot_import, reports, sync
+from app import categorize, copilot_import, reports, sync
 from app.db import connect
 from app.plaid_client import PlaidError
 from tests.conftest import COPILOT_CSV, FakePlaid, mutation_error, page, plaid_account, plaid_txn
@@ -475,3 +475,49 @@ def test_what_else_the_bank_says_is_kept_and_kept_current(conn):
     assert json.loads(rows(conn)["t2"]["plaid_details"]) == {"posted": "2026-10-09", "bank_name": "FEE"}  # only what the bank filled in
     sync.sync_item(conn, fake, "item-1")
     assert json.loads(rows(conn)["t1"]["plaid_details"])["code"] == "adjustment"  # the bank's later word replaces it
+
+
+def test_names_come_without_the_codes_banks_add(conn):
+    fake = FakePlaid(pages={None: page([
+        plaid_txn("t1", 50, "2026-10-08", "Online Banking transfer to SAV 4321 Confirmation# XYZAB98765"),
+        plaid_txn("t2", 5, "2026-10-08", "SQ *CORNER BAKERY 123 Conf# 1A2B3C", merchant="Corner Bakery"),
+    ], "c1")})
+    link(conn, fake)
+    sync.sync_item(conn, fake, "item-1")
+    by_id = rows(conn)
+    assert by_id["t1"]["name"] == "Online Banking transfer to SAV"
+    # What the bank sent stays, for the transaction's page.
+    assert by_id["t1"]["original_name"] == "Online Banking transfer to SAV 4321 Confirmation# XYZAB98765"
+    assert json.loads(by_id["t1"]["plaid_details"])["bank_name"] == "Online Banking transfer to SAV 4321 Confirmation# XYZAB98765"
+    assert by_id["t2"]["name"] == "Corner Bakery"  # the merchant's name comes first, as it was
+
+
+def test_rules_rename_new_transactions_but_not_ones_renamed_by_hand(conn):
+    bank = "Mobile Banking payment to CRD 8765 Confirmation# "
+    fake = FakePlaid(pages={
+        None: page([plaid_txn("t1", 25, "2026-10-08", bank + "a1b2c3d4")], "c1"),
+        "c1": page([plaid_txn("t2", 30, "2026-10-09", bank + "e5f6g7h8")], "c2", modified=[plaid_txn("t1", 26, "2026-10-08", bank + "a1b2c3d4")]),
+    })
+    link(conn, fake)
+    bills = conn.execute("INSERT INTO categories (name) VALUES ('Card bills')").lastrowid
+    categorize.add_rename(conn, "Mobile Banking payment to CRD", "Card payment")
+    categorize.add_rule(conn, "card payment", "equals", bills, None)  # a rule for the new name puts it in a category
+    conn.commit()
+    sync.sync_item(conn, fake, "item-1")
+    assert (rows(conn)["t1"]["name"], rows(conn)["t1"]["category_id"]) == ("Card payment", bills)
+
+    conn.execute("UPDATE transactions SET name = 'My card', user_edited = 1, name_edited = 1 WHERE plaid_transaction_id = 't1'")
+    conn.commit()
+    sync.sync_item(conn, fake, "item-1")
+    assert (rows(conn)["t1"]["name"], rows(conn)["t1"]["amount"]) == ("My card", -26)
+    assert (rows(conn)["t2"]["name"], rows(conn)["t2"]["category_id"]) == ("Card payment", bills)
+
+
+def test_rules_made_for_the_names_banks_sent_still_match_them(conn):
+    fake = FakePlaid(pages={None: page([plaid_txn("t1", 40, "2026-10-01", "Payment from CHK 1111 CONF#q9w8e7r6t")], "c1")})
+    link(conn, fake)
+    bills = conn.execute("INSERT INTO categories (name) VALUES ('Card bills')").lastrowid
+    categorize.add_rule(conn, "from chk 1111", "contains", bills, None)  # made before names lost their account numbers
+    conn.commit()
+    sync.sync_item(conn, fake, "item-1")
+    assert (rows(conn)["t1"]["name"], rows(conn)["t1"]["category_id"]) == ("Payment from CHK", bills)

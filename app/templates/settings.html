@@ -24,6 +24,14 @@
 </section>
 
 <section class="card">
+  <h2>Names from your bank</h2>
+  <p>New transactions come without the confirmation codes and account numbers banks add to their names.
+    {%- if name_work.changes %} {{ plural(name_work.changes, "earlier name") }} can be cleaned up.{% endif %}
+    {%- if name_work.offers %} {{ plural(name_work.offers, "rule") }} could name new ones like your earlier ones.{% endif %}</p>
+  <p><a class="button" href="/names">{{ icon("tag") }} {{ "Review names" if name_work.changes or name_work.offers else "See how names are cleaned up" }}</a></p>
+</section>
+
+<section class="card">
   <h2>More</h2>
   <ul class="link-list">
     <li><a href="/categories">{{ icon("tag") }} Categories &amp; rules</a></li>

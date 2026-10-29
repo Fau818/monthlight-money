@@ -12,7 +12,7 @@ from app.main import bank_details, create_app, find_transactions, month_chunk
 from app.plaid_client import PlaidError
 from tests.conftest import COPILOT_CSV, FakePlaid, page, plaid_account, plaid_txn
 
-PAGES = ["/", "/transactions", "/budgets", "/recurring", "/accounts", "/categories", "/import", "/settings"]
+PAGES = ["/", "/transactions", "/budgets", "/recurring", "/accounts", "/categories", "/import", "/settings", "/names"]
 
 
 def test_every_page_loads_when_empty(client):
@@ -62,6 +62,77 @@ def test_recategorizing_offers_a_rule(client, settings):
     response = client.post(f"/rules/from-transaction/{tid}", data={"back": "/transactions"})
     assert "Rule saved" in response.text
     assert tuple(conn.execute("SELECT pattern, category_id FROM rules WHERE pattern = 'shell'").fetchone()) == ("shell", shopping)
+    conn.close()
+
+
+def test_renaming_a_transaction_offers_to_rename_the_others(client, settings):
+    import_sample(client, settings)
+    conn = sync.connect(settings.db_path)
+    ids = [r[0] for r in conn.execute("SELECT id FROM transactions WHERE name = 'Netflix' ORDER BY id")]
+    category = conn.execute("SELECT category_id FROM transactions WHERE id = ?", (ids[0],)).fetchone()[0]
+    form = {"name": "Netflix family plan", "category_id": category, "type": "regular", "quiet": "1", "back": "/transactions"}
+    text = unescape(client.post(f"/transactions/{ids[0]}", data=form).text)
+    assert "Renamed it “Netflix family plan”." in text and "Rename the 2 others named “Netflix” too, and new ones" in text
+    assert tuple(conn.execute("SELECT user_edited, name_edited FROM transactions WHERE id = ?", (ids[0],)).fetchone()) == (1, 1)
+
+    text = unescape(client.post(f"/rules/rename-from-transaction/{ids[0]}", data={"old": "Netflix", "back": "/transactions"}).text)
+    assert "Renamed 2 others. New ones named “Netflix” will come named “Netflix family plan”." in text
+    assert {r[0] for r in conn.execute("SELECT name FROM transactions WHERE id IN (?, ?, ?)", ids)} == {"Netflix family plan"}
+    # The rule the import made for the name keeps its category, and renames now too.
+    rule = conn.execute("SELECT category_id, rename_to FROM rules WHERE pattern = 'netflix'").fetchone()
+    assert tuple(rule) == (category, "Netflix family plan")
+    assert "Netflix family plan" in client.get("/categories").text
+    conn.close()
+
+
+def test_renaming_a_split_offers_the_same(client, settings):
+    import_sample(client, settings)
+    conn = sync.connect(settings.db_path)
+    tid, day = conn.execute("SELECT id, date FROM transactions WHERE name = 'Amazon'").fetchone()
+    client.post(f"/transactions/{tid}/split", data={"part_name": ["Shoes", "Socks"], "part_amount": ["15", ""], "part_category": ["", ""]})
+    text = unescape(client.post(f"/transactions/{tid}/whole", data={"name": "Amazon order", "date": day, "quiet": "1"}).text)
+    assert "Renamed it “Amazon order”." in text and "Rename new ones named “Amazon” too" in text
+    assert tuple(conn.execute("SELECT name, name_edited FROM transactions WHERE id = ?", (tid,)).fetchone()) == ("Amazon order", 1)
+    conn.execute("UPDATE transactions SET name = 'Amazon Conf# 1A2B3C4D' WHERE id = ?", (tid,))
+    conn.commit()
+    text = unescape(client.post(f"/transactions/{tid}/whole", data={"name": "Amazon Conf# 1A2B3C4D", "date": "2026-09-20"}).text)
+    assert "Saved. It's dated" in text and "Rename" not in text  # only its date changed: nothing to offer
+    conn.close()
+
+
+def test_rules_can_give_a_name(client, settings):
+    conn = sync.connect(settings.db_path)
+    account = conn.execute("INSERT INTO accounts (name) VALUES ('Card')").lastrowid
+    for renamed in (0, 1):
+        conn.execute("INSERT INTO transactions (account_id, date, amount, name, source, name_edited) VALUES (?, '2026-10-01', -5, ?, 'plaid', ?)",
+                     (account, "SQ *CORNER BAKERY", renamed))
+    conn.commit()
+    assert "Pick what the rule does" in unescape(client.post("/rules", data={"pattern": "corner bakery", "match": "contains"}).text)
+    text = unescape(client.post("/rules", data={"pattern": "corner bakery", "match": "contains", "rename_to": " Bakery ", "apply": "1"}).text)
+    assert "Rule saved. Updated 1 transactions." in text and "<td>Bakery</td>" in text
+    assert [r[0] for r in conn.execute("SELECT name FROM transactions ORDER BY id")] == ["Bakery", "SQ *CORNER BAKERY"]
+    conn.close()
+
+
+def test_the_names_page_learns_from_earlier_names_and_cleans_up(client, settings):
+    conn = sync.connect(settings.db_path)
+    account = conn.execute("INSERT INTO accounts (name) VALUES ('Checking')").lastrowid
+    bank = "Online transfer to savings Conf# 1A2B3C4D"
+    for name, source, day in ((bank, "plaid", "2026-10-01"), ("To savings", "copilot", "2026-08-01"), ("To savings", "copilot", "2026-09-01")):
+        conn.execute("INSERT INTO transactions (account_id, date, amount, name, source, plaid_details) VALUES (?, ?, -50, ?, ?, ?)",
+                     (account, day, name, source, json.dumps({"bank_name": bank})))
+    conn.commit()
+    assert "1 earlier name can be cleaned up. 1 rule could name new ones like your earlier ones." in unescape(client.get("/settings").text)
+    text = unescape(client.get("/names").text)
+    assert all(part in text for part in ("Online transfer to savings", "To savings", "2 earlier ones", "Make the rules", "Rename it"))
+
+    text = unescape(client.post("/names/rules", data={"patterns": ["online transfer to savings", "something else"]}).text)
+    assert "Made 1 rule: new transactions come named like your earlier ones." in text
+    assert "Nothing to suggest" in text  # the rule names them now
+    text = unescape(client.post("/names/clean").text)
+    assert "Renamed 1 transaction." in text and "Nothing to clean up" in text
+    assert conn.execute("SELECT name FROM transactions WHERE source = 'plaid'").fetchone()[0] == "To savings"  # the rule's name
+    assert "Review names" not in client.get("/settings").text
     conn.close()
 
 

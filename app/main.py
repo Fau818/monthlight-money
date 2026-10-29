@@ -24,7 +24,7 @@ from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from . import backup, categorize, charts, copilot_import, links, looks, recurring, reports, splits, sync, tags
+from . import backup, categorize, charts, copilot_import, links, looks, names, recurring, reports, splits, sync, tags
 from .config import Settings, load_settings
 from .db import connect, get_meta, set_meta
 from .plaid_client import PlaidError
@@ -807,13 +807,17 @@ def register_routes(app: FastAPI) -> None:
         except ValueError:
             return redirect(page, "Check the date, for example 2026-10-14.")
         name = name.strip() or t["name"]
+        renamed = int(name != t["name"])
         with conn:
-            # Set by hand, so the bank's later updates keep them (sync._update_existing).
-            conn.execute("UPDATE transactions SET name = ?, date = ?, user_edited = max(user_edited, ?), date_edited = max(date_edited, ?) WHERE id = ?",
-                         (name, when, int(name != t["name"]), int(when != t["date"]), tid))
+            # Set by hand, so the bank's later updates keep them (sync._update_existing), and so do renaming rules.
+            conn.execute("""UPDATE transactions SET name = ?, date = ?, user_edited = max(user_edited, ?), name_edited = max(name_edited, ?),
+                                   date_edited = max(date_edited, ?) WHERE id = ?""",
+                         (name, when, renamed, renamed, int(when != t["date"]), tid))
+        offer = names.rename_offer(conn, get_transaction(conn, tid), t["name"]) if renamed else None
         if quiet:
-            return redirect(page)
-        return redirect(page, f"Saved. It's dated {short_date(when)}, and so are its parts." if when != t["date"] else "Saved.")
+            return redirect(page, f"Renamed it “{name}”." if offer else None, rename_offer=offer)
+        return redirect(page, f"Saved. It's dated {short_date(when)}, and so are its parts." if when != t["date"] else "Saved.",
+                        rename_offer=offer)
 
     @app.post("/transactions/{tid}/unlink")
     def unlink_transaction(tid: int, back: str = Form("/transactions"), conn=Depends(get_db)):
@@ -865,17 +869,19 @@ def register_routes(app: FastAPI) -> None:
             "type": type_, "excluded": int(exclude),
         }
         edited = any(new[k] != t[k] for k in new)
+        renamed = new["name"] != t["name"]
         message = f"Saved. It's now dated {short_date(when)}." if moved else "Saved."
         with conn:
             conn.execute(
                 """UPDATE transactions SET name = :name, category_id = :category_id, type = :type, excluded = :excluded,
                           notes = :notes, reviewed = :reviewed, recurring_id = :recurring_id, date = :date,
-                          user_edited = max(user_edited, :edited), date_edited = max(date_edited, :moved)
+                          user_edited = max(user_edited, :edited), name_edited = max(name_edited, :renamed),
+                          date_edited = max(date_edited, :moved)
                    WHERE id = :id""",
                 {**new, "notes": notes.strip() or None, "reviewed": int(bool(reviewed)),
                  # The part of a split charge isn't the charge: the transaction it's split from keeps the recurring link.
                  "recurring_id": optional_int(recurring_id) if type_ != "transfer" and not t["split_from_id"] else None, "date": when,
-                 "edited": int(edited), "moved": int(moved),
+                 "edited": int(edited), "renamed": int(renamed), "moved": int(moved),
                  "id": tid},
             )
             if new["type"] != "regular":
@@ -893,12 +899,26 @@ def register_routes(app: FastAPI) -> None:
                 message = f"Saved, and {changed} other transactions named “{new['name']}” were updated. New ones will match too."
             if new["type"] == "transfer":
                 sync.pair_own_transfers(conn)  # the other side of a move between the user's accounts follows
-        offer = None
+        offer = rename = None
         if new["category_id"] != t["category_id"] and not make_rule:
             offer = rule_offer(conn, get_transaction(conn, tid), new["category_id"])
+        if renamed and not make_rule:
+            rename = names.rename_offer(conn, get_transaction(conn, tid), t["name"])
         if quiet and not make_rule:
-            message = f"“{new['name']}” is now {category_name(conn, new['category_id'])}." if offer else None
-        return redirect(safe_back(back, "/transactions"), message, rule_offer=offer)
+            message = (f"“{new['name']}” is now {category_name(conn, new['category_id'])}." if offer
+                       else f"Renamed it “{new['name']}”." if rename else None)
+        return redirect(safe_back(back, "/transactions"), message, rule_offer=offer, rename_offer=rename)
+
+    @app.post("/rules/rename-from-transaction/{tid}")
+    def rename_from_transaction(tid: int, old: str = Form(""), back: str = Form("/transactions"), conn=Depends(get_db)):
+        """Gives every transaction named `old` the name transaction `tid` was just given, and new ones too."""
+        t = get_transaction(conn, tid)
+        if not old.strip() or old == t["name"]:
+            return redirect(safe_back(back, "/transactions"), "It already has that name.")
+        with conn:
+            renamed = names.rename_all(conn, old, t["name"])
+        later = f"New ones named “{old.strip()}” will come named “{t['name']}”."
+        return redirect(safe_back(back, "/transactions"), f"Renamed {plural(renamed, 'other')}. {later}" if renamed else later)
 
     @app.post("/rules/from-transaction/{tid}")
     def rule_from_transaction(tid: int, back: str = Form("/transactions"), conn=Depends(get_db)):
@@ -1214,11 +1234,14 @@ def register_routes(app: FastAPI) -> None:
 
     @app.post("/rules")
     def add_rule(pattern: str = Form(...), match: str = Form("contains"), category_id: str = Form(""),
-                 type: str = Form(""), apply: str = Form(""), conn=Depends(get_db)):
+                 type: str = Form(""), rename_to: str = Form(""), apply: str = Form(""), conn=Depends(get_db)):
         if not pattern.strip() or match not in ("equals", "contains"):
             return redirect("/categories#rules", "A rule needs some text to match.")
+        category, type_, rename_to = optional_int(category_id), type if type in categorize.TYPES else None, rename_to.strip()
+        if category is None and type_ is None and not rename_to:
+            return redirect("/categories#rules", "Pick what the rule does: a category, a type or a new name.")
         with conn:
-            rule_id = categorize.add_rule(conn, pattern, match, optional_int(category_id), type if type in categorize.TYPES else None)
+            rule_id = categorize.add_rule(conn, pattern, match, category, type_, rename_to)
             changed = categorize.apply_rule(conn, rule_id) if apply else 0
         return redirect("/categories#rules", "Rule saved." + (f" Updated {changed} transactions." if apply else ""))
 
@@ -1330,7 +1353,30 @@ def register_routes(app: FastAPI) -> None:
                 "rules": conn.execute("SELECT count(*) FROM rules").fetchone()[0],
             },
             backups=backup.backup_summary(settings.backup_dir),
+            name_work={"changes": len(names.cleanup(conn)), "offers": len(names.learned(conn))},
         )
+
+    @app.get("/names")
+    def names_page(request: Request, conn=Depends(get_db)):
+        return render(request, conn, "names.html", offers=names.learned(conn), changes=names.cleanup(conn))
+
+    @app.post("/names/rules")
+    def learn_names(patterns: list[str] = Form([]), conn=Depends(get_db)):
+        """Makes the renaming rules picked from those the names page offers (names.learned)."""
+        offers = {o["pattern"]: o for o in names.learned(conn)}
+        picked = [offers[p] for p in dict.fromkeys(patterns) if p in offers]
+        if not picked:
+            return redirect("/names", "Tick the rules to make.")
+        with conn:
+            for o in picked:
+                categorize.add_rename(conn, o["shown"], o["name"])
+        return redirect("/names", f"Made {plural(len(picked), 'rule')}: new transactions come named like your earlier ones.")
+
+    @app.post("/names/clean")
+    def clean_names(conn=Depends(get_db)):
+        with conn:
+            renamed = names.clean_up(conn)
+        return redirect("/names", f"Renamed {plural(renamed, 'transaction')}. What your bank sent stays under “From your bank” on each one.")
 
     @app.get("/export.csv")
     def export_csv(conn=Depends(get_db)):

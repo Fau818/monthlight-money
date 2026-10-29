@@ -105,25 +105,27 @@
 
 <section class="card" id="rules">
   <h2>Rules</h2>
-  <p class="muted small">Rules run on new transactions before Plaid's category is used. “Is” matches the whole name, “contains” matches part of it, ignoring capitals. Rules from your Copilot history are added for you.</p>
+  <p class="muted small">Rules run on new transactions before Plaid's category is used, and can give them a name of yours. “Is” matches the whole name, “contains” matches part of it, ignoring capitals. Rules from your Copilot history are added for you, and <a href="/names">Names from your bank</a> offers more from your earlier names.</p>
   <form method="post" action="/rules" class="filters add-row">
     <select name="match" aria-label="Match"><option value="contains">Name contains</option><option value="equals">Name is</option></select>
     <input name="pattern" placeholder="e.g. trader joe" required aria-label="Text to match">
     {{ category_select("category_id", options, none, empty="Keep category") }}
     <select name="type" aria-label="Type"><option value="">Keep type</option>{% for t in types %}<option value="{{ t }}">{{ t|capitalize }}</option>{% endfor %}</select>
+    <input name="rename_to" placeholder="Keep name" maxlength="120" aria-label="New name">
     <label class="check"><input type="checkbox" name="apply" value="1" checked> Also apply to past transactions</label>
     <button type="submit">Add rule</button>
   </form>
   {% if rules %}
     <div class="table-scroll">
       <table class="compact">
-        <thead><tr><th>When the name…</th><th>Category</th><th>Type</th><th></th></tr></thead>
+        <thead><tr><th>When the name…</th><th>Category</th><th>Type</th><th>Rename to</th><th></th></tr></thead>
         <tbody>
           {% for r in rules %}
             <tr>
               <td>{{ "is" if r.match == "equals" else "contains" }} “{{ r.pattern }}”</td>
               <td>{% if r.category_id %}{{ looks[r.category_id].emoji }} {% endif %}{{ r.category or "—" }}</td>
               <td>{{ r.type or "—" }}</td>
+              <td>{{ r.rename_to or "—" }}</td>
               <td class="num"><form method="post" action="/rules/{{ r.id }}/delete" class="inline"><button type="submit" class="link">Delete</button></form></td>
             </tr>
           {% endfor %}

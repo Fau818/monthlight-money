@@ -106,12 +106,19 @@
     {% endfor %}
     {% block content %}{% endblock %}
     {% if flash %}
-      <div class="toast" role="status" data-toast{% if flash.rule_offer %} data-sticky{% endif %}>
+      <div class="toast" role="status" data-toast{% if flash.rule_offer or flash.rename_offer %} data-sticky{% endif %}>
         <span>{{ flash.message }}</span>
         {% if flash.rule_offer %}
           <form method="post" action="/rules/from-transaction/{{ flash.rule_offer.id }}" class="inline" data-swap>
             <input type="hidden" name="back" value="{{ here }}">
             <button type="submit">Always put “{{ flash.rule_offer.name }}” in {{ flash.rule_offer.category }}{% if flash.rule_offer.others %} and update {{ flash.rule_offer.others }} more{% endif %}</button>
+          </form>
+        {% endif %}
+        {% if flash.rename_offer %}
+          {% set r = flash.rename_offer %}
+          <form method="post" action="/rules/rename-from-transaction/{{ r.id }}" class="inline" data-swap>
+            <input type="hidden" name="back" value="{{ here }}"><input type="hidden" name="old" value="{{ r.old }}">
+            <button type="submit">{% if r.others == 1 %}Rename the other one named “{{ r.old }}” too, and new ones{% elif r.others %}Rename the {{ r.others }} others named “{{ r.old }}” too, and new ones{% else %}Rename new ones named “{{ r.old }}” too{% endif %}</button>
           </form>
         {% endif %}
         <button type="button" class="icon-btn" data-toast-close aria-label="Dismiss">{{ icon("close") }}</button>

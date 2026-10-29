@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from difflib import SequenceMatcher
 
-from . import links, recurring
+from . import links, names, recurring
 from .categorize import APP_TRANSFERS, Categorizer, ensure_default_categories
 from .config import Settings
 from .db import connect
@@ -248,7 +248,17 @@ def _txn_date(t: dict) -> date:
 
 
 def _display_name(t: dict) -> str:
-    return t.get("merchant_name") or t.get("name") or "Unknown"
+    """Returns the name to show for transaction `t` before any rule renames it: the merchant's, else the bank's
+    without the codes and account numbers in it."""
+    return t.get("merchant_name") or names.clean(t.get("name")) or "Unknown"
+
+
+def _names(t: dict, categorizer: Categorizer) -> tuple[str, str | None, tuple[str | None, ...]]:
+    """Returns transaction `t`'s name (as the user's rules rename it), the bank's original text for it, and its other
+    names, which rules match too."""
+    shown, original = _display_name(t), t.get("original_description") or t.get("name")
+    # NOTE: rules made before the bank's names were cleaned up still match them as the bank sends them
+    return categorizer.rename(shown, t.get("name"), original) or shown, original, (shown, t.get("name"))
 
 
 def _plaid_category(t: dict) -> str | None:
@@ -325,11 +335,11 @@ def _update_existing(conn: sqlite3.Connection, t: dict, lookup_id: str, categori
     ).fetchone()
     if not row:
         return False
+    name, original, also = _names(t, categorizer)
     fields = {
         "id": row["id"], "pid": t["transaction_id"], "amount": -float(t["amount"]),
         "date": _txn_date(t).isoformat(), "pending": int(bool(t.get("pending"))),
-        "original": t.get("original_description") or t.get("name"), "pfc": _plaid_category(t),
-        "logo": t.get("logo_url"), "name": _display_name(t), "details": _details(t),
+        "original": original, "pfc": _plaid_category(t), "logo": t.get("logo_url"), "name": name, "details": _details(t),
     }
     # A date the user set by hand stays, even when the bank moves it (a pending charge can post on another day).
     # Otherwise a sync never moves the date later: it's the day the money was spent, so a charge keeps its pending day
@@ -349,7 +359,7 @@ def _update_existing(conn: sqlite3.Connection, t: dict, lookup_id: str, categori
         )
     else:
         fields["category"], fields["type"] = categorizer.categorize(
-            fields["name"], fields["original"], fields["pfc"], _plaid_confidence(t), row["account_type"])
+            name, original, fields["pfc"], _plaid_confidence(t), row["account_type"], also=also)
         conn.execute(
             """UPDATE transactions SET plaid_transaction_id = :pid, amount = :amount, pending = :pending,
                       date = CASE WHEN date_edited THEN date ELSE min(date, :date) END,
@@ -366,9 +376,9 @@ def _update_existing(conn: sqlite3.Connection, t: dict, lookup_id: str, categori
 
 def _insert(conn: sqlite3.Connection, account: sqlite3.Row, t: dict, day: date,
             categorizer: Categorizer, matcher: recurring.Matcher, reviewed: bool) -> None:
-    name, original, pfc = _display_name(t), t.get("original_description") or t.get("name"), _plaid_category(t)
+    (name, original, also), pfc = _names(t, categorizer), _plaid_category(t)
     amount = -float(t["amount"])  # Plaid counts money leaving the account as positive
-    category, type_ = categorizer.categorize(name, original, pfc, _plaid_confidence(t), account["type"])
+    category, type_ = categorizer.categorize(name, original, pfc, _plaid_confidence(t), account["type"], also=also)
     conn.execute(
         """INSERT INTO transactions (account_id, date, amount, name, original_name, category_id, type, pending,
                                      reviewed, source, plaid_transaction_id, plaid_category, logo_url, plaid_details, recurring_id)

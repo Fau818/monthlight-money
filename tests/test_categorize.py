@@ -138,3 +138,24 @@ def test_categories_for_transfers_and_income_are_not_learned(conn):
         assert learn_plaid_mapping(conn, code, ids["Supplies"]) is False
     assert learn_plaid_mapping(conn, "GENERAL_MERCHANDISE_OFFICE_SUPPLIES", ids["Supplies"]) is True
     assert [r[0] for r in conn.execute("SELECT plaid_category FROM plaid_category_map")] == ["GENERAL_MERCHANDISE_OFFICE_SUPPLIES"]
+
+
+def test_each_part_of_a_rule_comes_from_the_first_rule_that_sets_it(conn):
+    ids = add_categories(conn, "Coffee", "Treats")
+    categorize.add_rule(conn, "blue bottle", "equals", None, None, rename_to="Blue Bottle Coffee")  # it only renames
+    categorize.add_rule(conn, "bottle", "contains", ids["Coffee"], None)
+    c = categorize.Categorizer(conn)
+    assert c.rename("BLUE BOTTLE") == "Blue Bottle Coffee" and c.rename("Bottle shop") is None
+    assert c.categorize("Blue Bottle", None, None) == (ids["Coffee"], "regular")  # the renaming rule leaves the category to the next
+
+
+def test_applying_a_rule_renames_all_but_the_names_changed_by_hand(conn):
+    ids = add_categories(conn, "Coffee", "Treats")
+    account = conn.execute("INSERT INTO accounts (name) VALUES ('Card')").lastrowid
+    for name, edited, renamed in (("Blue Bottle", 0, 0), ("Blue Bottle", 1, 0), ("Blue Bottle", 1, 1)):
+        conn.execute("""INSERT INTO transactions (account_id, date, amount, name, category_id, user_edited, name_edited, source)
+                        VALUES (?, '2026-10-01', -5, ?, ?, ?, ?, 'plaid')""", (account, name, ids["Treats"], edited, renamed))
+    rule = categorize.add_rule(conn, "blue bottle", "equals", ids["Coffee"], None, rename_to="Blue Bottle Coffee")
+    assert categorize.apply_rule(conn, rule) == 2  # one both renamed and recategorized, one only renamed
+    assert [tuple(r) for r in conn.execute("SELECT name, category_id FROM transactions ORDER BY id")] == [
+        ("Blue Bottle Coffee", ids["Coffee"]), ("Blue Bottle Coffee", ids["Treats"]), ("Blue Bottle", ids["Treats"])]

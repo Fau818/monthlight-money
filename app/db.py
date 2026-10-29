@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     notes TEXT,
     reviewed INTEGER NOT NULL DEFAULT 0,
     user_edited INTEGER NOT NULL DEFAULT 0,  -- edited by hand; rules and syncs leave it alone
+    name_edited INTEGER NOT NULL DEFAULT 0,  -- renamed by hand; renaming rules and cleanups leave its name alone
     date_edited INTEGER NOT NULL DEFAULT 0,  -- date set by hand; syncs keep it
     own_date TEXT,                           -- while it's a part dated like its split, the date it had before; it gets it back on leaving
     reimburses_id INTEGER REFERENCES transactions(id) ON DELETE SET NULL,  -- the purchase this money pays back
@@ -108,6 +109,7 @@ CREATE TABLE IF NOT EXISTS rules (
     match TEXT NOT NULL DEFAULT 'equals',  -- equals | contains
     category_id INTEGER REFERENCES categories(id) ON DELETE CASCADE,
     type TEXT,
+    rename_to TEXT,                        -- the name to give them, or NULL to keep theirs
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE (pattern, match)
 );
@@ -139,8 +141,14 @@ CREATE TABLE IF NOT EXISTS transaction_tags (
 CREATE INDEX IF NOT EXISTS ix_transaction_tags_tag ON transaction_tags(tag_id);
 """
 
+# Before name_edited, user_edited stood for any change by hand. A row edited by hand whose name isn't the one the bank
+# gives it (its merchant's, else its own) was renamed, and so was one without the bank's details to tell.
+NAMES_EDITED_BEFORE = """UPDATE transactions SET name_edited = 1
+    WHERE user_edited = 1 AND CASE WHEN json_valid(plaid_details)
+        THEN name IS NOT coalesce(nullif(plaid_details ->> '$.merchant', ''), plaid_details ->> '$.bank_name') ELSE 1 END"""
+
 # Columns added after databases already existed. CREATE TABLE IF NOT EXISTS leaves an existing table as it is,
-# so connect() adds these to older databases.
+# so connect() adds these to older databases, each with the statements that then fill it in, if any.
 ADDED_COLUMNS = {
     "accounts": [("archived", "INTEGER NOT NULL DEFAULT 0")],
     "categories": [("emoji", "TEXT"), ("color", "TEXT")],
@@ -148,7 +156,9 @@ ADDED_COLUMNS = {
                      ("reimburses_id", "INTEGER REFERENCES transactions(id) ON DELETE SET NULL"),
                      ("transfer_id", "INTEGER REFERENCES transactions(id) ON DELETE SET NULL"),
                      ("split_from_id", "INTEGER REFERENCES transactions(id) ON DELETE SET NULL"),
-                     ("plaid_details", "TEXT"), ("link_id", "INTEGER"), ("own_date", "TEXT")],
+                     ("plaid_details", "TEXT"), ("link_id", "INTEGER"), ("own_date", "TEXT"),
+                     ("name_edited", "INTEGER NOT NULL DEFAULT 0", NAMES_EDITED_BEFORE)],
+    "rules": [("rename_to", "TEXT")],
 }
 # Indexes and triggers on columns in ADDED_COLUMNS, which can only be made once those columns exist.
 ADDED_INDEXES = ["CREATE INDEX IF NOT EXISTS ix_transactions_split ON transactions(split_from_id)",
@@ -209,9 +219,11 @@ ADDED_INDEXES = ["CREATE INDEX IF NOT EXISTS ix_transactions_split ON transactio
 def _add_missing_columns(conn: sqlite3.Connection) -> None:
     for table, columns in ADDED_COLUMNS.items():
         present = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
-        for name, declaration in columns:
+        for name, declaration, *fill in columns:
             if name not in present:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {declaration}")
+                for statement in fill:
+                    conn.execute(statement)
     for statement in ADDED_INDEXES:
         conn.execute(statement)
 

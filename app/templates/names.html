@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon %}
+{% block title %}Names from your bank{% endblock %}
+{% block content %}
+<p><a class="back" href="/settings">{{ icon("left") }} Settings</a></p>
+<div class="page-head"><h1>Names from your bank</h1></div>
+<p class="muted">New transactions come without the confirmation codes and account numbers banks add to their names, and when Plaid knows the merchant, they get its name. What your bank sent stays under <strong>From your bank</strong> on each one. Rename one, and the app offers to rename the others with its name, and new ones too.</p>
+
+<section class="card" id="learned">
+  <h2>Name new ones like your earlier ones</h2>
+  {% if offers %}
+    <p class="muted small">Your earlier transactions with these names have another name, from your Copilot history or given by you. A rule gives new ones that name too{% if changes %}, and the cleanup below as well{% endif %}. Rules are listed, and can be deleted, on <a href="/categories#rules">Categories &amp; rules</a>.</p>
+    <form method="post" action="/names/rules" data-swap>
+      <ul class="pick-rows">
+        {% for o in offers %}
+          <li><label><input type="checkbox" name="patterns" value="{{ o.pattern }}" checked>
+            <span class="rename"><span class="muted">{{ o.shown }}</span> <span aria-hidden="true">→</span><span class="sr-only">becomes</span> <strong>{{ o.name }}</strong></span>
+            <span class="num muted small">{{ plural(o.count, "earlier one") }}</span></label></li>
+        {% endfor %}
+      </ul>
+      <div class="form-actions"><button type="submit" class="primary">Make the rules</button></div>
+    </form>
+  {% else %}
+    <p class="muted small">Nothing to suggest: new transactions already come named like your earlier ones.</p>
+  {% endif %}
+</section>
+
+<section class="card" id="cleanup">
+  <h2>Clean up earlier names</h2>
+  {% if changes %}
+    <p class="muted small">Your bank's names for these come out differently now: without codes or account numbers, or as a rule names them. Names you changed by hand aren't here: they stay as they are.</p>
+    <ul class="renames">
+      {% for c in changes %}
+        <li><span class="muted small">{{ c.date|short_date }}</span><span class="old">{{ c.name }}</span>
+          <span class="new"><span aria-hidden="true">→ </span><span class="sr-only">becomes </span>{{ c.new }}</span></li>
+      {% endfor %}
+    </ul>
+    <form method="post" action="/names/clean" data-swap>
+      <button type="submit" class="primary">Rename {{ "it" if changes|length == 1 else "these " ~ changes|length }}</button>
+    </form>
+  {% else %}
+    <p class="muted small">Nothing to clean up: every name from your bank comes out the way it would now.</p>
+  {% endif %}
+</section>
+{% endblock %}

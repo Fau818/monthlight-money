@@ -27,6 +27,15 @@ New transactions wait on **Dashboard → To review** and **Transactions → To r
 
 Click a transaction to open it beside the list (over it on a smaller screen); the list stays where it was. Changes save as soon as you make them: the name, the date, the category, notes, tags, the type and **Reviewed**. **Split** and **Recurring** are at the top, and the rarer actions, like linking a payback or the other side of a move, are under **⋯**. A transaction's date is the day you spent the money, not the day it posted, and your bank's updates never move it to a later day. A date you set by hand stays, whatever the bank says later.
 
+## Names from your bank
+
+New transactions come without the codes and account numbers banks add to their names, like "Conf# 1A2B3C4D" or "SAV 1234", and without the note a Zelle sender wrote. When Plaid knows the merchant, the transaction gets its name. What the bank sent stays under **From your bank** on the transaction.
+
+1. Rename a transaction, and the app offers to rename the others with that name, and the new ones that come with it.
+2. Taking the offer makes a rule. Rules are listed on **Categories & rules**, where **Rename to** makes one by hand.
+3. A name you change by hand stays, whatever the bank or a rule says later.
+4. **Settings → Names from your bank** offers rules that name new transactions the way your earlier ones are named, in your Copilot history or by you. Below them, it lists the earlier transactions whose names can still be cleaned up. Nothing changes until you press a button.
+
 ## Leaving something out of spending
 
 Pick **🚫 Excluded** in its category menu, in the list or on its page. A transaction is either in a category or excluded: excluding clears its category, and picking a category counts it again.
