@@ -390,7 +390,8 @@ def filter_chips(conn, filters: dict, categories: list[dict], link) -> list[dict
     if filters["amount"]:
         choice, first, second = amount_choice(filters["amount"])
         amounts = {"eq": f"${first}", "between": f"${first} – ${second}", "over": f"Over ${first}", "under": f"Under ${first}"}
-        chips.append({"label": amounts.get(choice, filters["amount"]), "remove": link(amount="")})
+        label = amounts[choice] if amount_range(filters["amount"]) else f"“{filters['amount']}”"  # NOTE: unreadable, it leaves nothing out
+        chips.append({"label": label, "remove": link(amount="")})
     if filters["review"] == "done":
         chips.append({"label": "Reviewed", "remove": link(review="")})
     if filters["transfers"]:
