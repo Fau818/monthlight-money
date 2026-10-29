@@ -1483,8 +1483,8 @@ def register_routes(app: FastAPI) -> None:
 
     @app.post("/budgets")
     async def save_budgets(request: Request, conn=Depends(get_db)):
-        """Saves the budgets typed for a month (`month`, else this one): from then on, or for that month alone (`apply`
-        "month"); an empty one means no budget."""
+        """Saves the budgets changed for a month (`month`, else this one): from then on, or for that month alone (`apply`
+        "month"); an empty one means no budget. Those left as they were stay as they are, later months included."""
         form = await request.form()
         back = safe_back(str(form.get("back")), "/categories")
         month = reports.valid_month(str(form.get("month") or "")) or reports.current_month(date.today())
@@ -1496,9 +1496,12 @@ def register_routes(app: FastAPI) -> None:
                     updates.append((int(key[7:]), optional_money(str(value))))
                 except ValueError:
                     return redirect(back, f"“{value}” isn't a number.")
+        budgets = reports.effective_budgets(conn, month)
         with conn:
             for cid, amount in updates:
-                reports.set_budget(conn, cid, month, amount, only)
+                # NOTE: the form holds every category; one left as it was keeps its later months' budgets
+                if amount != budgets.get(cid):
+                    reports.set_budget(conn, cid, month, amount, only)
         return redirect(back, f"Budgets saved for {month_label(month)} only." if only else f"Budgets saved from {month_label(month)} on.")
 
     @app.get("/categories/{cid}")
@@ -1571,9 +1574,9 @@ def register_routes(app: FastAPI) -> None:
             raise HTTPException(404, "Recurring charge not found.")
         charges = conn.execute(f"{_LINK_ROWS} WHERE t.recurring_id = ? ORDER BY t.date DESC, t.id DESC LIMIT 24", (rid,)).fetchall()
         year_ago = (date.today() - timedelta(days=365)).isoformat()
+        year_total = conn.execute("SELECT coalesce(-sum(amount), 0) FROM transactions WHERE recurring_id = ? AND date >= ?", (rid, year_ago)).fetchone()[0]
         return render(request, conn, "recurring_edit.html", r=item, charges=charges, back=safe_back(back, "/recurring"), today=date.today(),
-                      categories=category_options(conn), frequencies=list(recurring.FREQUENCIES),
-                      year_total=round(-sum(c["amount"] for c in charges if c["date"] >= year_ago), 2))
+                      categories=category_options(conn), frequencies=list(recurring.FREQUENCIES), year_total=round(year_total, 2))
 
     @app.post("/recurring/track")
     def track_recurring(name: str = Form(...), pattern: str = Form(...), frequency: str = Form("monthly"),
@@ -1814,7 +1817,7 @@ def register_routes(app: FastAPI) -> None:
     def add_default_categories(conn=Depends(get_db)):
         with conn:
             added = categorize.ensure_default_categories(conn)
-        return redirect("/categories", "Added the default categories." if added else "You already have categories.")
+        return redirect("/rules", "Added the default categories." if added else "You already have categories.")
 
     @app.post("/categories/{cid}")
     def save_category(cid: int, name: str = Form(...), parent_id: str = Form(""), excluded: str = Form(""),
@@ -2654,8 +2657,11 @@ def report_view(conn, filters: dict, today: date) -> dict:
             part.update(color=s["color"], label=s["label"], link=segment(col["column"], s["key"]))
     for s in series:
         s["cells"] = [{"value": s["values"][c], "link": segment(c, s["key"])} for c in columns]
-    done = [c for c in columns if reports.column_range(c)[1] <= reports.month_range(this_month)[0]] or columns
-    average = sum(column_totals[c] for c in done) / len(done) if len(columns) > 1 else None
+    # NOTE: a quarter or a year the span starts or ends partway through has less in it, and so does one under way,
+    under_way = min(span["end"], reports.month_range(this_month)[0])
+    since = max(span["start"], first[:7] + "-01")  # and one from before the history began has nothing in it
+    done = [c for c in columns if reports.column_range(c)[0] >= since and reports.column_range(c)[1] <= under_way]
+    average = sum(column_totals[c] for c in done) / len(done) if len(columns) > 1 and done else None
     if average is not None and average > 0:
         chart["average"] = {"value": round(average, 2), "top": charts.y_percent(min(average, chart["high"]), 0.0, chart["high"])}
 

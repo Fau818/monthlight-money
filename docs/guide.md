@@ -36,7 +36,7 @@ The app follows your system's light or dark mode. To pick one yourself, press th
 
 **Reports** shows where the money went over a span of time: the last 12 months to start with, or this month, last month, the last 3 months, this year, last year, one month, or dates of your own.
 
-- Totals come **by month**, **by quarter** or **by year**, for **spending** or **income**, and **by category**, **merchant**, **account** or **tag**. Up to seven of them get a color of their own; the rest add up as **Other**.
+- Totals come **by month**, **by quarter** or **by year**, for **spending** or **income**, and **by category**, **merchant**, **account** or **tag**. Up to eight show on their own, each in a color of its own; past that, the smallest add up as **Other**.
 - Above the chart: what was spent and earned, the difference, how much of your income you kept, and a month's spending on average. Each compares with the span before and with the same span a year earlier, when your history goes back that far.
 - Point at a bar for its numbers, or press **Show as a table**. Click a part of a bar to see its transactions, beside the report; click a transaction there to open it.
 - **Leave out** takes things out of the report only, without changing any transaction: categories (a group with its subcategories), accounts, tags, merchants, anything over an amount, and single transactions, with the **×** beside them in **Top merchants** and **Biggest expenses**. The chips under the menu bring each back.

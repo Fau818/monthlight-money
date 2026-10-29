@@ -9,7 +9,7 @@
 <section class="card" id="learned">
   <h2>Name new ones like your earlier ones</h2>
   {% if offers %}
-    <p class="muted small">Your earlier transactions with these names have another name, from your Copilot history or given by you. A rule gives new ones that name too{% if changes %}, and the cleanup below as well{% endif %}. Rules are listed, and can be deleted, on <a href="/categories#rules">Categories &amp; rules</a>.</p>
+    <p class="muted small">Your earlier transactions with these names have another name, from your Copilot history or given by you. A rule gives new ones that name too{% if changes %}, and the cleanup below as well{% endif %}. Rules are listed, and can be deleted, on <a href="/rules#rules">Rules &amp; tags</a>.</p>
     <form method="post" action="/names/rules" data-swap>
       <ul class="pick-rows">
         {% for o in offers %}

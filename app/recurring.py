@@ -30,11 +30,7 @@ def add_months(day: date, months: int) -> date:
 
 def next_date(last: date, frequency: str) -> date:
     """Returns when the charge after one on `last` is expected."""
-    if frequency == "weekly":
-        return last + timedelta(days=7)
-    if frequency == "biweekly":
-        return last + timedelta(days=14)
-    return add_months(last, {"quarterly": 3, "yearly": 12}.get(frequency, 1))
+    return step(last, frequency, 1)
 
 
 def monthly_cost(amount: float | None, frequency: str) -> float:
@@ -204,24 +200,26 @@ def occurrences(item: dict, start: date, end: date) -> list[date]:
 def calendar_month(conn: sqlite3.Connection, items: list[dict], month: str, today: date | None = None) -> dict:
     """Returns a month of recurring charges and paydays (recurring money in) for a calendar:
     - "weeks": rows of seven days, Sunday first, each {"date", "in_month", "today", "events"}; an event is a charge that
-      came (a transaction linked to a recurring one, "done") or one expected from today on
+      came (a transaction linked to a recurring one, "done") or one still expected, up to a week overdue as month_summary
+      counts it
     - "events": all of them, by day
-    - "payday", the next expected money in from today, and "before_payday", the charges expected until then"""
+    - "payday", the next money in still expected, and "before_payday", the charges expected until then"""
     today = today or date.today()
+    due_since = today - timedelta(days=7)  # NOTE: a charge a few days late is still due; one later than that isn't (list_recurring)
     first = date(int(month[:4]), int(month[5:]), 1)
     after = add_months(first, 1)
     by_id = {i["id"]: i for i in items}
     events: list[dict] = []
     for t in conn.execute(
-        """SELECT t.id, t.date, t.amount, t.recurring_id FROM transactions t WHERE t.recurring_id IS NOT NULL AND t.date >= ? AND t.date < ?
-             AND NOT EXISTS (SELECT 1 FROM transactions s WHERE s.split_from_id = t.id) ORDER BY t.date""",
+        # NOTE: a split charge keeps its link on the transaction it's split from, which is the one counted here
+        "SELECT t.id, t.date, t.amount, t.recurring_id FROM transactions t WHERE t.recurring_id IS NOT NULL AND t.date >= ? AND t.date < ? ORDER BY t.date",
         (first.isoformat(), after.isoformat())):
         item = by_id.get(t["recurring_id"])
         if item:
             events.append({"day": date.fromisoformat(t["date"]), "id": item["id"], "name": item["name"], "amount": t["amount"],
                            "done": True, "transaction": t["id"]})
     for item in items:
-        for day in occurrences(item, max(first, today), after):
+        for day in occurrences(item, max(first, due_since), after):
             events.append({"day": day, "id": item["id"], "name": item["name"], "amount": item["amount"] or 0.0, "done": False})
     events.sort(key=lambda e: (e["day"], e["amount"] > 0, e["name"].lower()))
     start = first - timedelta(days=(first.weekday() + 1) % 7)  # NOTE: weekday() is 0 on Monday; the weeks start on Sunday
@@ -232,15 +230,15 @@ def calendar_month(conn: sqlite3.Connection, items: list[dict], month: str, toda
         weeks[-1].append({"date": day, "in_month": first <= day < after, "today": day == today,
                           "events": [e for e in events if e["day"] == day]})
         day += timedelta(days=1)
-    # The next payday from today, and what's expected before it, whatever month it falls in.
+    # The next payday still expected, and what's expected before it, whatever month it falls in.
     horizon = today + timedelta(days=400)
-    paydays = sorted((d, i) for i in items if (i["amount"] or 0) > 0 for d in occurrences(i, today, horizon)[:1])
+    paydays = sorted(((d, i) for i in items if (i["amount"] or 0) > 0 for d in occurrences(i, due_since, horizon)[:1]), key=lambda p: p[0])
     payday = {"day": paydays[0][0], "item": paydays[0][1]} if paydays else None
     before = []
     if payday:
         for i in items:
             if (i["amount"] or 0) < 0:
-                before += [{"day": d, "item": i} for d in occurrences(i, today, payday["day"])]
+                before += [{"day": d, "item": i} for d in occurrences(i, due_since, payday["day"])]
         before.sort(key=lambda e: e["day"])
     return {"weeks": weeks, "events": events, "payday": payday, "before_payday": before,
             "due_before_payday": round(-sum(e["item"]["amount"] for e in before), 2)}

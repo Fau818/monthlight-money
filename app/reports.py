@@ -197,7 +197,7 @@ def category_spending(conn: sqlite3.Connection, month: str) -> list[dict]:
         node["spent"] = round(node["spent"] + sum(ch["spent"] for ch in node["children"]), 2)
         if node["budget"] is None:
             node["total_budget"] = round(sum(ch["total_budget"] or 0 for ch in node["children"]), 2) or None
-        node["children"] = sorted((ch for ch in node["children"] if ch["spent"] or ch["budget"]), key=lambda n: -n["spent"])
+        node["children"] = sorted((ch for ch in node["children"] if ch["spent"] or ch["budget"] is not None), key=lambda n: -n["spent"])
     if own.get(None):
         spent = round(own[None], 2)
         roots.append({"id": None, "name": "Uncategorized", "budget": None, "total_budget": None, "carry": 0.0, "rollover": None,
@@ -348,6 +348,11 @@ def merge_leave_outs(*leaves: dict) -> dict:
     return merged
 
 
+def _tidy(name: str) -> str:
+    """Returns SQL for `name` in lowercase, with its spaces tidied as merchant_key tidies them (runs of up to eight)."""
+    return f"lower(replace(replace(replace(trim({name}), '    ', ' '), '  ', ' '), '  ', ' '))"
+
+
 def leave_out_sql(leave: dict) -> tuple[str, dict]:
     """Returns the SQL condition on _REPORTED's rows that leaves out what `leave` names, and its named parameters:
     - "account", "tag" and "id": ids; leaving out a transaction leaves out its paybacks, and a split its parts
@@ -373,7 +378,7 @@ def leave_out_sql(leave: dict) -> tuple[str, dict]:
         where.append(f"""NOT EXISTS (SELECT 1 FROM transaction_tags lt WHERE lt.transaction_id = coalesce(p.id, t.id)
                                     AND lt.tag_id IN ({listed('lg', leave['tag'])}))""")
     if leave.get("merchant"):
-        where.append(f"lower({MERCHANT}) NOT IN ({listed('lm', leave['merchant'], 'lower({})')})")
+        where.append(f"{_tidy(MERCHANT)} NOT IN ({listed('lm', leave['merchant'], _tidy('{}'))})")
     if leave.get("id"):
         either = listed("li", leave["id"])
         where.append(f"t.id NOT IN ({either}) AND coalesce(p.id, 0) NOT IN ({either}) AND coalesce(t.split_from_id, 0) NOT IN ({either})")

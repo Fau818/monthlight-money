@@ -93,6 +93,27 @@ def test_a_month_of_recurring_charges_and_the_next_payday(conn):
     assert month["weeks"][1][6]["today"] and not month["weeks"][0][0]["in_month"]
     # The next payday is the 16th; nothing is due before it. After it, Netflix is.
     assert month["payday"]["day"] == date(2026, 10, 16) and month["due_before_payday"] == 0
+    # A paycheck a day late is still the next payday; once it came, the one after is, with Netflix due before it.
+    late = recurring.calendar_month(conn, recurring.list_recurring(conn, date(2026, 10, 17)), "2026-10", date(2026, 10, 17))
+    assert late["payday"]["day"] == date(2026, 10, 16) and (16, "Payroll", False) in [(e["day"].day, e["name"], e["done"]) for e in late["events"]]
+    conn.execute("INSERT INTO transactions (account_id, date, amount, name, recurring_id, source) VALUES (?, '2026-10-16', 2000, 'Acme Payroll', ?, 'plaid')",
+                 (account, pay))
     later = recurring.calendar_month(conn, recurring.list_recurring(conn, date(2026, 10, 17)), "2026-10", date(2026, 10, 17))
     assert later["payday"]["day"] == date(2026, 10, 30) and later["due_before_payday"] == 15.49
-    assert [e["item"]["id"] for e in later["before_payday"]] == [netflix] and rent and pay
+    assert [e["item"]["id"] for e in later["before_payday"]] == [netflix] and rent
+
+
+def test_paydays_on_one_day_and_a_split_charge_that_came(conn):
+    account = conn.execute("INSERT INTO accounts (name, type) VALUES ('Checking', 'depository')").lastrowid
+    add(conn, account, date(2026, 10, 1), "Job one", 1000)
+    add(conn, account, date(2026, 10, 1), "Job two", 500)
+    bill = conn.execute("INSERT INTO transactions (account_id, date, amount, name, source) VALUES (?, '2026-10-05', -80, 'Phone bill', 'plaid')",
+                        (account,)).lastrowid
+    for name, pattern, amount in (("Job one", "job one", 1000), ("Job two", "job two", 500), ("Phone", "phone bill", -80)):
+        recurring.track(conn, name, pattern, "monthly", amount, None)
+    # Split, the bill keeps its link to the recurring charge on the transaction it's split from; its parts have none.
+    conn.execute("INSERT INTO transactions (account_id, date, amount, name, split_from_id, source) VALUES (?, '2026-10-05', -50, 'Line', ?, 'split'), "
+                 "(?, '2026-10-05', -30, 'Phone', ?, 'split')", (account, bill, account, bill))
+    month = recurring.calendar_month(conn, recurring.list_recurring(conn, date(2026, 10, 20)), "2026-10", date(2026, 10, 20))
+    assert ("Phone", True) in [(e["name"], e["done"]) for e in month["events"]]
+    assert month["payday"]["day"] == date(2026, 11, 1)  # both jobs pay that day: no error comparing them

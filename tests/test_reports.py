@@ -292,3 +292,19 @@ def test_a_change_needs_something_to_compare():
     assert change(0, 0) is None
     assert change(120, 100) == {"diff": 20, "percent": 20}
     assert change(50, 0) == {"diff": 50, "percent": None}  # nothing before: no percentage
+
+
+def test_a_merchant_is_left_out_whatever_its_spacing(conn):
+    card = conn.execute("INSERT INTO accounts (name, type) VALUES ('Card', 'credit')").lastrowid
+    conn.executemany("INSERT INTO transactions (account_id, date, amount, name, source) VALUES (?, '2026-10-02', ?, ?, 'manual')",
+                     [(card, -10, "Corner  Store"), (card, -20, " corner store "), (card, -5, "Elsewhere")])
+    rows = reports.counted(conn, "2026-10-01", "2026-11-01", leave={"merchant": ["Corner Store"]})
+    assert [r["name"] for r in rows] == ["Elsewhere"]
+
+
+def test_a_subcategory_with_a_budget_of_nothing_still_shows(conn):
+    ids = setup(conn)
+    conn.execute("UPDATE categories SET budget = 0 WHERE id = ?", (ids["groceries"],))
+    conn.execute("DELETE FROM transactions WHERE category_id = ?", (ids["groceries"],))
+    food = next(n for n in reports.category_spending(conn, "2026-10") if n["name"] == "Food")
+    assert [(c["name"], c["budget"]) for c in food["children"]] == [("Groceries", 0)]

@@ -1277,3 +1277,40 @@ def test_the_new_pages_handle_odd_input_and_the_way_back(client, settings):
     page = unescape(client.get(f"/categories/{gas}?month=2026-08").text)
     assert "Spent in August" in page and "No transactions in Gas in August." in page
     conn.close()
+
+
+def test_saving_the_budgets_leaves_the_untouched_ones_and_their_later_months(client, settings):
+    import_sample(client, settings)
+    conn = sync.connect(settings.db_path)
+    food, gas = (conn.execute("SELECT id FROM categories WHERE name = ?", (n,)).fetchone()[0] for n in ("Food", "Gas"))
+    with conn:
+        reports.set_budget(conn, gas, "2026-12", 300.0, only=True)  # a bigger one for December alone
+    form = {"month": "2026-10", "back": "/categories?month=2026-10", f"budget_{food}": "500", f"budget_{gas}": ""}
+    client.post("/budgets", data=form)  # Food changed; Gas's field held what October had, nothing
+    assert [reports.effective_budgets(conn, m)[gas] for m in ("2026-10", "2026-12", "2027-01")] == [None, 300.0, None]
+    assert reports.effective_budgets(conn, "2026-10")[food] == 500.0
+    conn.close()
+
+
+def test_a_reports_average_leaves_out_quarters_it_only_partly_covers(client, settings):
+    import_sample(client, settings)
+    # The last 12 months by quarter start in November: the fourth quarter of 2025 is partial, the one under way too,
+    # and the history begins in July, so only the third quarter is whole: 15.49 and 15.49 of Netflix, then September's
+    # 110.79.
+    page = unescape(client.get("/reports?by=quarter").text)
+    assert "Average $142" in page  # not over five quarters, nor over the two before the history
+
+
+def test_recurring_charges_add_up_their_year_and_rules_have_their_links(client, settings):
+    import_sample(client, settings)
+    conn = sync.connect(settings.db_path)
+    checking = conn.execute("SELECT id FROM accounts WHERE name = 'Acme Checking'").fetchone()[0]
+    with conn:
+        rid = conn.execute("INSERT INTO recurring (name, pattern, amount, frequency) VALUES ('Gym', 'gym', -10, 'weekly')").lastrowid
+        conn.executemany("INSERT INTO transactions (account_id, date, amount, name, recurring_id, source) VALUES (?, ?, -10, 'Gym', ?, 'manual')",
+                         [(checking, (date(2026, 10, 13) - timedelta(weeks=w)).isoformat(), rid) for w in range(40)])
+    page = unescape(client.get(f"/recurring/{rid}").text)
+    assert "$400.00 in the last 12 months" in page and "24 charges (the last 24)" in page  # all 40 add up, 24 are listed
+    assert 'href="/rules"' in client.get("/settings").text
+    assert client.post("/categories/defaults", follow_redirects=False).headers["location"] == "/rules"
+    conn.close()
