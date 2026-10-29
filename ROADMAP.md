@@ -45,20 +45,25 @@ workspace, in the style of Copilot Money's Mac app.
     earlier ones are named.
 - **Colors:** each category gets a color of its own, from 13.
 
-## v0.2.x: after v0.2.1
+## v0.2.2: filters you can see, selecting and the keyboard
+
+- **Filters:** a menu with a labeled field for each: dates (this month, last month, the last 3 or 12 months, this
+  year, last year, one month, or days of your own), the amount (equals, between, more than or less than), type,
+  review, moves between accounts, and accounts, categories and tags, several at once. The list changes as you pick.
+- The filters in use show as chips you can remove. The list sorts by date or by amount, and totals show what's listed
+  as spent, income and net.
+- **Selecting:** each row's checkbox shows under the pointer, as in Copilot; Shift-click ticks a range, and on a phone
+  Select shows them all. With two or more ticked, the pane changes them together: category, tags, review, link and
+  combine.
+- **Keys:** ↑ and ↓ move, Return opens, X ticks, R marks reviewed, C changes the category, / searches, Esc closes,
+  and ? lists them.
+
+## v0.2.x: after v0.2.2
 
 In this order, each step its own release.
 
-1. **Filters you can see, selecting and the keyboard.**
-   - A filter menu has a labeled field for each filter: dates (presets or custom), accounts, categories, tags, type,
-     review status and transfers. Amount gets a choice of equals, between, more than or less than.
-   - Active filters show as chips you can remove. The list sorts by date or amount, and totals show what's listed as
-     spent, income and net.
-   - Every row has a checkbox. With two or more ticked, the pane edits them together: category, tags, review,
-     exclude, link and combine.
-   - ↑ and ↓ move, X selects, R marks reviewed, C changes the category, / searches and Esc closes.
-2. **The other pages** laid out like the transactions: the dashboard, budgets, recurring, accounts and settings.
-3. **Reports: where the money goes.**
+1. **The other pages** laid out like the transactions: the dashboard, budgets, recurring, accounts and settings.
+2. **Reports: where the money goes.**
    - Pick a period: this month, the last 3 or 12 months, year to date, last year, or custom. Totals come by month,
      quarter or year.
    - Show spending, income, net and savings rate, grouped by category, merchant, account or tag.
@@ -71,7 +76,7 @@ In this order, each step its own release.
      - top merchants and biggest expenses
    - Click a bar to see its transactions. Save a report and pin it to the dashboard.
    - It reuses the filter menu.
-4. **Categories and budgets.**
+3. **Categories and budgets.**
    - Budgets move into a Categories page with spending pace and expected recurring charges.
    - Each category gets its own page: history, average, year to date and top merchants.
    - Budget rollover and budgets that differ by month.
