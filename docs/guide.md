@@ -28,6 +28,10 @@ On **Transactions**, **Filters** opens a field for each filter:
 
 The list changes as you pick. The filters in use show as chips under the menu: press one to remove it. **Newest first** turns into **Biggest first**, one list by amount. Above the list, what it adds up to: spent, income and net, counted as the dashboard counts them.
 
+## Light or dark
+
+The app follows your system's light or dark mode. To pick one yourself, press the moon or the sun at the top of the sidebar (at the top of the screen on a phone), or choose in **Settings → Appearance**, where **Same as the system** goes back.
+
 ## Reports
 
 **Reports** shows where the money went over a span of time: the last 12 months to start with, or this month, last month, the last 3 months, this year, last year, one month, or dates of your own.

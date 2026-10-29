@@ -1083,3 +1083,16 @@ def test_reports_are_in_the_sidebar_and_under_more_on_a_phone(client):
     sidebar, more = text.split('<aside class="sidebar">')[1].split("</aside>")[0], text.split('class="more-menu"')[1].split("</details>")[0]
     assert 'href="/reports"' in sidebar and 'href="/reports"' in more
     assert 'href="/reports"' not in text.split('<nav class="tabbar"')[1]  # the tab bar keeps its five
+
+
+def test_the_app_can_be_light_or_dark_by_choice(client):
+    assert "data-theme=" not in client.get("/").text.split("<head>")[0]  # as the system has it, to start with
+    response = client.post("/theme", data={"theme": "dark", "back": "/settings"}, follow_redirects=False)
+    assert response.headers["location"] == "/settings" and "theme=dark" in response.headers["set-cookie"]
+    client.cookies.set("theme", "dark")
+    page = client.get("/settings").text
+    assert '<html lang="en" data-theme="dark">' in page and '<meta name="color-scheme" content="dark">' in page
+    assert 'value="dark" checked' in page
+    client.post("/theme", data={"theme": "system"})
+    client.cookies.set("theme", "purple")  # anything else is the system's
+    assert "data-theme" not in client.get("/").text.split("<head>")[0] and 'value="system" checked' in client.get("/settings").text

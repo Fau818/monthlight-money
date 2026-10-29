@@ -1,87 +1,57 @@
-/* A theme like Copilot Money's: navy in dark mode, with a light mode of the same blue-grays. Text keeps at least 4.5:1
-   contrast on every surface it sits on. The data-viz palette gives charts and categories their colors: --c-* are its
+/* A theme like Copilot Money's: navy in dark mode, with a light mode of the same blue-grays, each color written once as
+   light-dark(light, dark). Text keeps at least 4.5:1 contrast on every surface it sits on. The data-viz palette gives charts and categories their colors: --c-* are its
    eight colors in their fixed order, validated for color blindness and for contrast on these surfaces, then five more
    that only mark categories and tags (always beside their names; each pill's text keeps 4.5:1), and a gray. */
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
   --font: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  --page: #f3f6f9;          /* behind the cards */
-  --surface: #ffffff;       /* cards, the sidebar */
-  --surface-2: #edf1f6;     /* fields, and controls under the pointer */
-  --raised: #ffffff;        /* a choice picked on a --surface-2 track */
-  --raised-row: #eef4fc;    /* the row of the transaction that's open */
-  --bar: #ffffff;           /* the phone's top bar and tab bar */
-  --ink: #0b1726;
-  --ink-2: #3b4f66;
-  --muted: #566b85;
-  --grid: #e3e9f0;
-  --baseline: #c3cfdc;
-  --border: rgba(11, 40, 80, 0.1);
+  --page: light-dark(#f3f6f9, #00080f);          /* behind the cards */
+  --surface: light-dark(#ffffff, #030d19);       /* cards, the sidebar */
+  --surface-2: light-dark(#edf1f6, #0a1626);     /* fields, and controls under the pointer */
+  --raised: light-dark(#ffffff, #172a42);        /* a choice picked on a --surface-2 track */
+  --raised-row: light-dark(#eef4fc, #0c182a);    /* the row of the transaction that's open */
+  --bar: light-dark(#ffffff, #041222);           /* the phone's top bar and tab bar */
+  --ink: light-dark(#0b1726, #eef9ff);
+  --ink-2: light-dark(#3b4f66, #b4c8de);
+  --muted: light-dark(#566b85, #678db4);
+  --grid: light-dark(#e3e9f0, #0c1e32);
+  --baseline: light-dark(#c3cfdc, #1f3651);
+  --border: light-dark(rgba(11, 40, 80, 0.1), rgba(80, 170, 255, 0.12));
   --shadow: 0 1px 2px rgba(11, 23, 38, 0.04), 0 6px 20px rgba(11, 23, 38, 0.04);
-  --accent: #2a78d6;        /* chart marks */
-  --accent-text: #1d63c2;   /* links, focus rings */
-  --accent-bg: #2a6fdb;     /* filled buttons and the page you're on, with --on-accent text */
-  --on-accent: #ffffff;
-  --accent-wash: rgba(42, 111, 219, 0.09);
-  --col-muted: #c5d0dc;     /* months that aren't the one shown */
-  --context: #7d8ca0;       /* the line being compared against */
-  --in: #127a33;
-  --good: #127a33;
+  --accent: light-dark(#2a78d6, #3987e5);        /* chart marks */
+  --accent-text: light-dark(#1d63c2, #6cacff);   /* links, focus rings */
+  --accent-bg: light-dark(#2a6fdb, #6aa7f8);     /* filled buttons and the page you're on, with --on-accent text */
+  --on-accent: light-dark(#ffffff, #00080f);
+  --accent-wash: light-dark(rgba(42, 111, 219, 0.09), rgba(106, 167, 248, 0.14));
+  --col-muted: light-dark(#c5d0dc, #2a4260);     /* months that aren't the one shown */
+  --context: light-dark(#7d8ca0, #5f7a99);       /* the line being compared against */
+  --in: light-dark(#127a33, #1ed158);
+  --good: light-dark(#127a33, #1ed158);
   --critical: #d03b3b;
-  --critical-text: #b42b2b;
-  --warning-text: #8a5a00;
-  --popup: #0b1726;         /* the chart's readout and the message after an action */
-  --popup-ink: #eef4fa;
-  --notice: #e8f0fc;
-  --alert: #fdf1dc;
-  --c-blue: #2a78d6; --c-orange: #eb6834; --c-aqua: #1baf7a; --c-yellow: #eda100;
-  --c-magenta: #e87ba4; --c-green: #008300; --c-violet: #6250d6; --c-red: #e34948;
-  --c-lime: #82a000; --c-purple: #a543b5; --c-teal: #00868a; --c-brown: #8e5224; --c-sky: #58b5ed; --c-gray: #7d8ca0;
-  --aside-stripe: #9aa8b8; --aside-bg: #e6ebf1;  /* spending set aside from everyday spending, drawn hatched */
-  --pill-wash: 13%; --pill-ink-share: 60%; --pill-ink-base: #000; --pill-hover: 0.96;  /* a category pill (.pill) */
+  --critical-text: light-dark(#b42b2b, #ff5a5f);
+  --warning-text: light-dark(#8a5a00, #fab219);
+  --popup: light-dark(#0b1726, #172a42);         /* the chart's readout and the message after an action */
+  --popup-ink: light-dark(#eef4fa, #eef9ff);
+  --notice: light-dark(#e8f0fc, #0a1d36);
+  --alert: light-dark(#fdf1dc, #2b2110);
+  --c-blue: light-dark(#2a78d6, #3987e5); --c-orange: light-dark(#eb6834, #d95926);
+  --c-aqua: light-dark(#1baf7a, #199e70); --c-yellow: light-dark(#eda100, #c98500);
+  --c-magenta: light-dark(#e87ba4, #d55181); --c-green: #008300; --c-violet: light-dark(#6250d6, #9085e9);
+  --c-red: light-dark(#e34948, #e66767); --c-lime: light-dark(#82a000, #8ead20);
+  --c-purple: light-dark(#a543b5, #c16acf); --c-teal: light-dark(#00868a, #008c90);
+  --c-brown: light-dark(#8e5224, #a97248); --c-sky: light-dark(#58b5ed, #6fc1f6); --c-gray: #7d8ca0;
+  --aside-stripe: light-dark(#9aa8b8, #4a6383); --aside-bg: light-dark(#e6ebf1, #0c1a2c);  /* spending set aside from everyday spending, drawn hatched */
+  --pill-wash: 13%; --pill-ink-share: 60%; --pill-ink-base: light-dark(#000, #fff); --pill-hover: 0.96;  /* a category pill (.pill) */
   --sidebar: 264px;
   --pane: 440px;            /* an open transaction beside the list */
   --sticky-top: 0px;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    --page: #00080f;
-    --surface: #030d19;
-    --surface-2: #0a1626;
-    --raised: #172a42;
-    --raised-row: #0c182a;
-    --bar: #041222;
-    --ink: #eef9ff;
-    --ink-2: #b4c8de;
-    --muted: #678db4;
-    --grid: #0c1e32;
-    --baseline: #1f3651;
-    --border: rgba(80, 170, 255, 0.12);
-    --shadow: none;
-    --accent: #3987e5;
-    --accent-text: #6cacff;
-    --accent-bg: #6aa7f8;
-    --on-accent: #00080f;
-    --accent-wash: rgba(106, 167, 248, 0.14);
-    --col-muted: #2a4260;
-    --context: #5f7a99;
-    --in: #1ed158;
-    --good: #1ed158;
-    --critical: #d03b3b;
-    --critical-text: #ff5a5f;
-    --warning-text: #fab219;
-    --popup: #172a42;
-    --popup-ink: #eef9ff;
-    --notice: #0a1d36;
-    --alert: #2b2110;
-    --c-blue: #3987e5; --c-orange: #d95926; --c-aqua: #199e70; --c-yellow: #c98500;
-    --c-magenta: #d55181; --c-green: #008300; --c-violet: #9085e9; --c-red: #e66767;
-    --c-lime: #8ead20; --c-purple: #c16acf; --c-teal: #008c90; --c-brown: #a97248; --c-sky: #6fc1f6; --c-gray: #7d8ca0;
-    --aside-stripe: #4a6383; --aside-bg: #0c1a2c;
-    --pill-wash: 18%; --pill-ink-share: 80%; --pill-ink-base: #fff; --pill-hover: 1.25;
-  }
-}
+/* Light or dark as the system has it, unless picked in Settings or with the sidebar's button (data-theme on <html>, from
+   the theme cookie). Colors hold both modes' values in light-dark(); what isn't a color changes here. */
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --shadow: none; --pill-wash: 18%; --pill-ink-share: 80%; --pill-hover: 1.25; } }
+:root[data-theme="dark"] { --shadow: none; --pill-wash: 18%; --pill-ink-share: 80%; --pill-hover: 1.25; }
 
 .tint-blue { --tint: var(--c-blue); } .tint-orange { --tint: var(--c-orange); } .tint-aqua { --tint: var(--c-aqua); }
 .tint-yellow { --tint: var(--c-yellow); } .tint-magenta { --tint: var(--c-magenta); } .tint-green { --tint: var(--c-green); }
@@ -123,6 +93,18 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 32px 64px; }
   padding: 14px 10px 10px; background: var(--surface); border-right: 1px solid var(--border); overflow-y: auto; z-index: 5;
   scrollbar-width: thin; scrollbar-color: var(--baseline) transparent; }
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 1.06rem; letter-spacing: -0.01em; color: var(--ink); padding: 2px 8px; }
+.brand-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.theme-switch .icon-btn { width: 32px; height: 32px; color: var(--muted); }
+.theme-switch .icon-btn:hover { color: var(--ink); }
+.theme-switch .icon { width: 18px; height: 18px; }
+/* The button shows the mode it switches to: the moon while it's light, the sun while it's dark. */
+.theme-to-light { display: none; }
+:root[data-theme="dark"] .theme-to-dark { display: none; }
+:root[data-theme="dark"] .theme-to-light { display: inline-grid; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .theme-to-dark { display: none; }
+  :root:not([data-theme="light"]) .theme-to-light { display: inline-grid; }
+}
 .brand:hover { text-decoration: none; }
 .logo { flex: none; width: 28px; height: 28px; border-radius: 7px; }
 .side-search { position: relative; margin: 14px 0 10px; }

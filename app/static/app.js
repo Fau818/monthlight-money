@@ -408,6 +408,34 @@ document.addEventListener("toggle", (event) => {
   document.cookie = `sidebar_folded=${folded.join(",")}; path=/; max-age=31536000; samesite=lax`;
 }, true);
 
+// Light or dark: the sidebar's button switches to the other at once, and so do Settings' choices; the cookie keeps it
+// for the server (main.THEME_COOKIE), so the next page comes in it with no flash.
+function setTheme(theme) {
+  const root = document.documentElement;
+  if (theme === "light" || theme === "dark") {
+    root.dataset.theme = theme;
+    document.cookie = `theme=${theme}; path=/; max-age=31536000; samesite=lax`;
+  } else {
+    delete root.dataset.theme;
+    document.cookie = "theme=; path=/; max-age=0; samesite=lax";
+  }
+  document.querySelector('meta[name="color-scheme"]').content = root.dataset.theme || "light dark";
+  for (const meta of document.querySelectorAll("meta[data-theme-color]")) {
+    meta.media = root.dataset.theme ? (meta.dataset.themeColor === root.dataset.theme ? "all" : "not all") : `(prefers-color-scheme: ${meta.dataset.themeColor})`;
+  }
+  for (const choice of document.querySelectorAll("[data-theme-form] input[name=theme]")) choice.checked = choice.value === (root.dataset.theme || "system");
+}
+
+document.addEventListener("click", (event) => {
+  const button = event.target.closest && event.target.closest("[data-theme-to]");
+  if (!button) return;
+  event.preventDefault();
+  setTheme(button.dataset.themeTo);
+});
+document.addEventListener("change", (event) => {
+  if (event.target.matches("[data-theme-form] input[name=theme]")) setTheme(event.target.value);
+});
+
 // Close the phone's More menu, and the filter menu, when tapping elsewhere.
 document.addEventListener("click", (event) => {
   for (const menu of document.querySelectorAll("details.more-menu[open], details.filter-menu[open]")) {

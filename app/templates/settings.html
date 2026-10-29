@@ -5,6 +5,21 @@
 <div class="page-head"><h1>Settings</h1></div>
 
 <section class="card">
+  <h2>Appearance</h2>
+  {# Applied at once with JavaScript (app.js); without it, with Save. #}
+  <form method="post" action="/theme" class="inline-edit" data-theme-form>
+    <input type="hidden" name="back" value="/settings">
+    <div class="segmented" role="radiogroup" aria-label="Appearance">
+      {% for value, label in [("system", "Same as the system"), ("light", "Light"), ("dark", "Dark")] %}
+        <label><input type="radio" name="theme" value="{{ value }}"{% if (theme or "system") == value %} checked{% endif %}><span>{{ label }}</span></label>
+      {% endfor %}
+    </div>
+    <noscript><button type="submit">Save</button></noscript>
+  </form>
+  <p class="muted small">The sun or moon at the top of the sidebar switches it too.</p>
+</section>
+
+<section class="card">
   <h2>Plaid</h2>
   <dl class="details-list">
     <div><dt>Mode</dt><dd>{{ "Production (your real banks)" if settings.plaid_env == "production" else "Sandbox (fake test banks)" }}</dd></div>

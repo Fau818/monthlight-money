@@ -42,6 +42,7 @@ REPORTS_NAV = ("/reports", "Reports", "chart")
 SIDE_NAV = NAV[:2] + [REPORTS_NAV] + NAV[2:]
 MORE_NAV = [("/categories", "Categories & rules", "tag"), ("/import", "Import", "download"), ("/settings", "Settings", "sliders")]
 FOLDED_COOKIE = "sidebar_folded"  # the account groups folded in the sidebar, by kind: "credit,loan" (app.js sets it)
+THEME_COOKIE = "theme"  # "light" or "dark" when picked (POST /theme, or app.js); else the system's
 PAGE_SIZE = 200
 # How long before a bank's access through Plaid expires to start asking for a fresh login. Many US banks ask
 # for one every 12 months.
@@ -216,6 +217,7 @@ def render(request: Request, conn, template: str, **context) -> Response:
         "review_count": conn.execute(f"SELECT count(*) FROM transactions t WHERE t.reviewed = 0 OR {reports.SPLIT_OFF}").fetchone()[0],
         "last_synced": conn.execute("SELECT max(last_synced_at) FROM plaid_items").fetchone()[0],
         "side_groups": sidebar_groups(conn, set((request.cookies.get(FOLDED_COOKIE) or "").split(","))),
+        "theme": request.cookies.get(THEME_COOKIE) if request.cookies.get(THEME_COOKIE) in ("light", "dark") else "",
         "account_labels": account_labels(conn),
         **context,
     })
@@ -1865,6 +1867,17 @@ def register_routes(app: FastAPI) -> None:
             backups=backup.backup_summary(settings.backup_dir),
             name_work={"changes": len(names.cleanup(conn)), "offers": len(names.learned(conn))},
         )
+
+    @app.post("/theme")
+    def set_theme(theme: str = Form(""), back: str = Form("/")):
+        """Shows the app light or dark (`theme`), or as the system does ("system"), from now on. With JavaScript the page
+        changes at once (app.js), which sets the same cookie."""
+        response = redirect(safe_back(back))
+        if theme in ("light", "dark"):
+            response.set_cookie(THEME_COOKIE, theme, max_age=365 * 86400, samesite="lax")
+        else:
+            response.delete_cookie(THEME_COOKIE)
+        return response
 
     @app.get("/names")
     def names_page(request: Request, conn=Depends(get_db)):

@@ -61,10 +61,9 @@ def test_stacked_bars_geometry():
 
 def test_the_palette_matches_the_stylesheet():
     css = (Path(__file__).resolve().parent.parent / "app" / "static" / "style.css").read_text()
-    dark = css.index("@media (prefers-color-scheme: dark)")
-    for mode, part in (("light", css[:dark]), ("dark", css[dark:])):
-        for name, hex_value in charts.HUES[mode].items():
-            assert f"--c-{name}: {hex_value};" in part, (mode, name)
+    for name in charts.HUES["light"]:
+        light, dark = charts.HUES["light"][name], charts.HUES["dark"][name]
+        assert (f"--c-{name}: light-dark({light}, {dark});" if light != dark else f"--c-{name}: {light};") in css, name
 
 
 def test_neighbors_in_a_stack_tell_apart():

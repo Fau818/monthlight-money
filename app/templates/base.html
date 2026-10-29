@@ -1,12 +1,13 @@
 {% from "_macros.html" import icon -%}
 <!doctype html>
-<html lang="en">
+<html lang="en"{% if theme %} data-theme="{{ theme }}"{% endif %}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="color-scheme" content="light dark">
-  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#041222" media="(prefers-color-scheme: dark)">
+  {# Light or dark as picked (main.THEME_COOKIE), else as the system has it; app.js changes these when it's switched. #}
+  <meta name="color-scheme" content="{{ theme or 'light dark' }}">
+  <meta name="theme-color" content="#ffffff" media="{{ '(prefers-color-scheme: light)' if not theme else ('all' if theme == 'light' else 'not all') }}" data-theme-color="light">
+  <meta name="theme-color" content="#041222" media="{{ '(prefers-color-scheme: dark)' if not theme else ('all' if theme == 'dark' else 'not all') }}" data-theme-color="dark">
   <meta name="apple-mobile-web-app-title" content="Monthlight">
   <title>{% block title %}Monthlight{% endblock %}</title>
   <link rel="icon" href="/favicon.ico" sizes="32x32">
@@ -26,8 +27,20 @@
     </a>
   {%- endmacro %}
 
+  {# Switches between light and dark: in the background with JavaScript (app.js), else through the server. #}
+  {% macro theme_button(cls="") %}
+    <form method="post" action="/theme" class="theme-switch {{ cls }}">
+      <input type="hidden" name="back" value="{{ here }}">
+      <button type="submit" name="theme" value="dark" class="icon-btn theme-to-dark" data-theme-to="dark" title="Switch to dark mode" aria-label="Switch to dark mode">{{ icon("moon") }}</button>
+      <button type="submit" name="theme" value="light" class="icon-btn theme-to-light" data-theme-to="light" title="Switch to light mode" aria-label="Switch to light mode">{{ icon("sun") }}</button>
+    </form>
+  {% endmacro %}
+
   <aside class="sidebar">
-    <a class="brand" href="/"><img class="logo" src="/static/icon.svg?v={{ static_version }}" alt="" width="28" height="28">Monthlight</a>
+    <div class="brand-row">
+      <a class="brand" href="/"><img class="logo" src="/static/icon.svg?v={{ static_version }}" alt="" width="28" height="28">Monthlight</a>
+      {{ theme_button() }}
+    </div>
     {# On the transactions page it searches within the filters picked there, whose own search field shows only on a
        phone, where there's no sidebar. #}
     <form method="get" action="/transactions" class="side-search" role="search">
@@ -73,6 +86,7 @@
 
   <header class="topbar">
     <a class="brand" href="/"><img class="logo" src="/static/icon.svg?v={{ static_version }}" alt="" width="28" height="28">Monthlight</a>
+    {{ theme_button() }}
     {% if settings.plaid_configured %}
       <form method="post" action="/sync" class="sync">
         <input type="hidden" name="back" value="{{ here }}">
