@@ -132,7 +132,9 @@ On **Transactions**, press **?** to see them:
 
 ## Recurring charges
 
-**Recurring** lists what you've tracked, what's still to come this month first; each opens beside the list, where you change its name, how often it comes, its usual amount and its category, or pause it, and see the charges it matched. **Track a charge** tracks one by hand, a paycheck too, and **Looks recurring** offers the ones that repeat on a schedule.
+**Recurring** starts with a calendar of the month: what came, in gray, and what's expected from today on, paydays in green. The arrows show other months, and above the calendar, when your next payday is and what's due before it.
+
+Below it are the charges you track, what's still to come this month first; each opens beside the list, where you change its name, how often it comes, its usual amount and its category, or pause it, and see the charges it matched. **Track a charge** tracks one by hand, a paycheck too (its amount as money in, like 2450), and **Looks recurring** offers the ones that repeat on a schedule.
 
 ## Tags
 

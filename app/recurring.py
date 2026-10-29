@@ -177,3 +177,70 @@ def find_candidates(conn: sqlite3.Connection, today: date | None = None) -> list
         })
     candidates.sort(key=lambda c: -c["count"])
     return candidates
+
+
+def step(last: date, frequency: str, times: int) -> date:
+    """Returns when the charge `times` charges after one on `last` is expected, counted from `last` itself, so a charge
+    on the 31st comes back on the 31st after a shorter month."""
+    if frequency in ("weekly", "biweekly"):
+        return last + timedelta(days=FREQUENCIES[frequency] * times)
+    return add_months(last, {"quarterly": 3, "yearly": 12}.get(frequency, 1) * times)
+
+
+def occurrences(item: dict, start: date, end: date) -> list[date]:
+    """Returns the days a tracked recurring charge (from list_recurring) is expected from `start` to `end`, the end
+    left out: each step after its last charge. None for one paused, one without a charge yet, or one so late it may
+    have been canceled."""
+    if not item["active"] or not item["last_date"] or item["late"]:
+        return []
+    out, times = [], 1
+    while (day := step(item["last_date"], item["frequency"], times)) < end and times < 1000:
+        if day >= start:
+            out.append(day)
+        times += 1
+    return out
+
+
+def calendar_month(conn: sqlite3.Connection, items: list[dict], month: str, today: date | None = None) -> dict:
+    """Returns a month of recurring charges and paydays (recurring money in) for a calendar:
+    - "weeks": rows of seven days, Sunday first, each {"date", "in_month", "today", "events"}; an event is a charge that
+      came (a transaction linked to a recurring one, "done") or one expected from today on
+    - "events": all of them, by day
+    - "payday", the next expected money in from today, and "before_payday", the charges expected until then"""
+    today = today or date.today()
+    first = date(int(month[:4]), int(month[5:]), 1)
+    after = add_months(first, 1)
+    by_id = {i["id"]: i for i in items}
+    events: list[dict] = []
+    for t in conn.execute(
+        """SELECT t.id, t.date, t.amount, t.recurring_id FROM transactions t WHERE t.recurring_id IS NOT NULL AND t.date >= ? AND t.date < ?
+             AND NOT EXISTS (SELECT 1 FROM transactions s WHERE s.split_from_id = t.id) ORDER BY t.date""",
+        (first.isoformat(), after.isoformat())):
+        item = by_id.get(t["recurring_id"])
+        if item:
+            events.append({"day": date.fromisoformat(t["date"]), "id": item["id"], "name": item["name"], "amount": t["amount"],
+                           "done": True, "transaction": t["id"]})
+    for item in items:
+        for day in occurrences(item, max(first, today), after):
+            events.append({"day": day, "id": item["id"], "name": item["name"], "amount": item["amount"] or 0.0, "done": False})
+    events.sort(key=lambda e: (e["day"], e["amount"] > 0, e["name"].lower()))
+    start = first - timedelta(days=(first.weekday() + 1) % 7)  # NOTE: weekday() is 0 on Monday; the weeks start on Sunday
+    weeks, day = [], start
+    while day < after or day.weekday() != 6:
+        if day.weekday() == 6:
+            weeks.append([])
+        weeks[-1].append({"date": day, "in_month": first <= day < after, "today": day == today,
+                          "events": [e for e in events if e["day"] == day]})
+        day += timedelta(days=1)
+    # The next payday from today, and what's expected before it, whatever month it falls in.
+    horizon = today + timedelta(days=400)
+    paydays = sorted((d, i) for i in items if (i["amount"] or 0) > 0 for d in occurrences(i, today, horizon)[:1])
+    payday = {"day": paydays[0][0], "item": paydays[0][1]} if paydays else None
+    before = []
+    if payday:
+        for i in items:
+            if (i["amount"] or 0) < 0:
+                before += [{"day": d, "item": i} for d in occurrences(i, today, payday["day"])]
+        before.sort(key=lambda e: e["day"])
+    return {"weeks": weeks, "events": events, "payday": payday, "before_payday": before,
+            "due_before_payday": round(-sum(e["item"]["amount"] for e in before), 2)}

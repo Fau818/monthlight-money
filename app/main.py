@@ -1539,11 +1539,16 @@ def register_routes(app: FastAPI) -> None:
     # ---- recurring ----
 
     @app.get("/recurring")
-    def recurring_page(request: Request, conn=Depends(get_db)):
+    def recurring_page(request: Request, month: str | None = None, conn=Depends(get_db)):
+        """Recurring: a month's calendar of charges and paydays (`month`, else this one), what's due before the next
+        payday, and the charges tracked, those that look recurring after them."""
         today = date.today()
         items = recurring.list_recurring(conn, today)
+        month = reports.valid_month(month) or reports.current_month(today)
         return render(
-            request, conn, "recurring.html", items=items, today=today,
+            request, conn, "recurring.html", items=items, today=today, month=month,
+            calendar=recurring.calendar_month(conn, items, month, today), tracks_income=any((i["amount"] or 0) > 0 for i in items),
+            prev_month=reports.shift_month(month, -1), next_month=reports.shift_month(month, 1), this_month=reports.current_month(today),
             monthly=sum(i["monthly"] for i in items if i["active"] and (i["amount"] or 0) < 0),
             summary=recurring.month_summary(conn, items, today),
             candidates=recurring.find_candidates(conn, today), categories=category_options(conn),

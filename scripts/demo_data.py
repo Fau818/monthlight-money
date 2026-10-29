@@ -2,8 +2,8 @@
 
 Steps:
 1. Make the accounts, the categories and their budgets.
-2. Add 14 months of transactions up to today: bills, paychecks, everyday spending, paired moves between accounts, and
-   tuition twice a year.
+2. Add 14 months of transactions up to today: bills, a paycheck every other Friday, everyday spending, paired moves
+   between accounts, and tuition twice a year.
 3. Add a split, a purchase friends paid back, tags, recurring charges, and daily balances for the net worth chart.
 4. Let one budget roll over and another differ for a month; set the tuition aside from everyday spending, and show it
    apart on the dashboard.
@@ -110,7 +110,7 @@ def build(folder: Path, today: date | None = None, seed: int = 2) -> Path:
             for when, name, amount, category, account in MONTHLY:
                 if day.day == when:
                     add(day, name, rng.uniform(*amount) if isinstance(amount, tuple) else amount, category, account)
-            if day.day in (1, 15):
+            if day.weekday() == 4 and (day - start).days // 7 % 2 == 0:  # every other Friday
                 add(day, PAYCHECK[0], PAYCHECK[1], kind="income")
             if day.day == 25:
                 move(day, round(rng.uniform(900, 1400), 2), "Everyday Checking", "Rewards Card", "Rewards Card Payment", "Payment Thank You")
@@ -145,6 +145,7 @@ def build(folder: Path, today: date | None = None, seed: int = 2) -> Path:
         tags.add(conn, work, [dinner])
         for name, pattern, amount, category in RECURRING:
             recurring.track(conn, name, pattern, "monthly", amount, categories[category])
+        recurring.track(conn, "Paycheck", PAYCHECK[0].lower(), "biweekly", PAYCHECK[1], None)
 
         # Restaurants roll over from four months ago, and Shopping had a bigger budget for December alone.
         conn.execute("UPDATE categories SET rollover_since = ? WHERE id = ?",

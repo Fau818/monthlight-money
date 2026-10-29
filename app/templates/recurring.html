@@ -15,6 +15,55 @@
   </div>
 </section>
 
+{# A month of recurring charges and paydays (recurring.calendar_month): those that came, and those expected from today on,
+   each opening in the pane; then what's due before the next payday. Without JavaScript the arrows open other months. #}
+<section class="card rec-calendar" id="calendar">
+  <div class="card-head">
+    <div class="month-nav compact">
+      <a class="icon-btn" href="/recurring?month={{ prev_month }}#calendar" aria-label="The month before">{{ icon("left") }}</a>
+      <h2>{{ month|month_label }}</h2>
+      <a class="icon-btn" href="/recurring?month={{ next_month }}#calendar" aria-label="The month after">{{ icon("right") }}</a>
+      {% if month != this_month %}<a class="chip" href="/recurring#calendar">This month</a>{% endif %}
+    </div>
+    <span class="cal-key muted small"><i class="cal-dot"></i> Charge <i class="cal-dot income"></i> Payday <i class="cal-dot done"></i> Came</span>
+  </div>
+  {% if calendar.payday %}
+    {% set p = calendar.payday %}
+    <p class="payday-line">Next payday: <strong>{{ p.day.isoformat()|day_label }}</strong>, {{ p.day|days_until(today) }} ({{ p.item.name }}, {{ (p.item.amount or 0)|amount }}).
+      {% if calendar.before_payday %}Due before then: <strong>{{ calendar.due_before_payday|money }}</strong>, {{ plural(calendar.before_payday|length, "charge") }}.{% else %}Nothing is due before then.{% endif %}</p>
+  {% elif not tracks_income %}
+    <p class="muted small">Track your paycheck to see what's due before the next one: <a href="/recurring/new?back={{ here|urlencode }}" data-pane>Track a charge</a>, with its amount as money in, like 2450.</p>
+  {% endif %}
+  <div class="cal" role="table" aria-label="Recurring charges and paydays in {{ month|month_label }}">
+    <div class="cal-row cal-head" role="row">{% for d in ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] %}<span role="columnheader">{{ d }}</span>{% endfor %}</div>
+    {% for week in calendar.weeks %}
+      <div class="cal-row" role="row">
+        {% for d in week %}
+          <div class="cal-day{% if not d.in_month %} out{% endif %}{% if d.today %} today{% endif %}" role="cell">
+            <span class="cal-num"{% if d.today %} aria-label="Today, {{ d.date.day }}"{% endif %}>{{ d.date.day }}</span>
+            {% for e in d.events %}
+              <a class="cal-event{% if e.amount > 0 %} income{% endif %}{% if e.done %} done{% endif %}" href="/recurring/{{ e.id }}?back={{ here|urlencode }}" data-pane
+                 title="{{ e.name }}: {{ e.amount|amount }}{{ ', came' if e.done else ', expected' }}"><span class="cal-name">{{ e.name }}</span> <b>{{ ("+" if e.amount > 0 else "") ~ (e.amount|abs|compact_money) }}</b></a>
+            {% endfor %}
+          </div>
+        {% endfor %}
+      </div>
+    {% endfor %}
+  </div>
+  {% if calendar.events %}
+    <details class="chart-table">
+      <summary>Show as a list</summary>
+      <table class="compact">
+        <thead><tr><th>Day</th><th>Charge</th><th class="num">Amount</th><th></th></tr></thead>
+        <tbody>{% for e in calendar.events %}<tr><td>{{ e.day|short_date }}</td><td><a href="/recurring/{{ e.id }}?back={{ here|urlencode }}" data-pane>{{ e.name }}</a></td>
+          <td class="num{% if e.amount > 0 %} money-in{% endif %}">{{ e.amount|amount }}</td><td class="muted small">{{ "came" if e.done else "expected" }}</td></tr>{% endfor %}</tbody>
+      </table>
+    </details>
+  {% else %}
+    <p class="empty">Nothing recurring in {{ month|month_name }}.</p>
+  {% endif %}
+</section>
+
 {# The tracked charges, each a row that opens in the pane: those still to come this month first, then the rest, then
    those paused. #}
 {% set due_ids = summary.due_items|map(attribute="id")|list %}

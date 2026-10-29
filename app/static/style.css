@@ -574,6 +574,36 @@ ul.txns { container-type: inline-size; }
 .cat-links li.child a { padding-left: 20px; }
 .category-txns .day-head { margin: 0 calc(-1 * var(--pad)); padding: 10px var(--pad) 4px; }
 
+/* ---- the recurring calendar (v0.2.8) ---- */
+.rec-calendar .card-head { flex-wrap: wrap; align-items: center; }
+.rec-calendar .month-nav h2 { margin: 0; min-width: 9.5em; text-align: center; }
+.cal-key { display: inline-flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; }
+.cal-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--c-orange); }
+.cal-dot.income { background: var(--in); }
+.cal-dot.done { background: var(--baseline); }
+.payday-line { margin: 4px 0 12px; font-size: 0.92rem; }
+.cal { display: grid; gap: 1px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--border); }
+.cal-row { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 1px; }
+.cal-head span { padding: 6px 8px; background: var(--surface-2); font-size: 0.68rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.cal-day { display: flex; flex-direction: column; gap: 3px; min-height: 86px; padding: 6px; background: var(--surface); min-width: 0; }
+.cal-day.out { background: color-mix(in srgb, var(--surface-2) 55%, var(--surface)); }
+.cal-day.out .cal-num { color: var(--muted); opacity: 0.6; }
+.cal-num { font-size: 0.78rem; font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.cal-day.today .cal-num { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--accent-bg); color: var(--on-accent); }
+.cal-event { display: flex; justify-content: space-between; gap: 4px; min-width: 0; padding: 2px 6px; border-radius: 6px; font-size: 0.72rem; line-height: 1.35;
+  color: var(--ink); background: color-mix(in srgb, var(--c-orange) 14%, var(--surface)); border-left: 3px solid var(--c-orange); }
+.cal-event:hover { text-decoration: none; filter: brightness(var(--pill-hover)); }
+.cal-event .cal-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-event b { flex: none; font-weight: 700; font-variant-numeric: tabular-nums; }
+.cal-event.income { background: color-mix(in srgb, var(--in) 14%, var(--surface)); border-left-color: var(--in); }
+.cal-event.done { background: var(--surface-2); border-left-color: var(--baseline); color: var(--ink-2); }
+@media (max-width: 640px) {
+  .cal-day { min-height: 64px; padding: 4px 3px; }
+  .cal-head span { padding: 5px 3px; text-align: center; }
+  .cal-event { padding: 1px 3px; border-left-width: 2px; font-size: 0.62rem; }
+  .cal-event .cal-name { display: none; }  /* a phone's day is too narrow for names: the list below has them */
+}
+
 /* ---- a page for each account (v0.2.7) ---- */
 .sheet.wide { max-width: 900px; }
 .drawer .sheet.wide { max-width: none; }

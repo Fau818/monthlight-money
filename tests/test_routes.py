@@ -1222,3 +1222,28 @@ def test_an_account_page_charts_its_balance(client, settings):
     assert "Balance over time" in page and 'data-plot' in page and "Oct 1" in page and "Oct 2" in page
     assert "Acme Payroll" in page and "All of them" in page
     conn.close()
+
+
+def test_recurring_has_a_calendar_of_charges_and_paydays(client, settings):
+    import_sample(client, settings)
+    conn = sync.connect(settings.db_path)
+    rid = conn.execute("SELECT id FROM recurring WHERE name = 'Netflix'").fetchone()[0]
+    page = unescape(client.get("/recurring").text)
+    # Without a paycheck tracked, it offers to track one; Netflix came on Sep 3 and was due Oct 3, too long ago: late.
+    assert "October 2026" in page and "Track your paycheck" in page and 'class="cal-day' in page
+    september = unescape(client.get("/recurring?month=2026-09").text)
+    assert f'href="/recurring/{rid}?back=/recurring%3Fmonth%3D2026-09"' in september and "came" in september
+    with conn:
+        checking = conn.execute("SELECT id FROM accounts WHERE name = 'Acme Checking'").fetchone()[0]
+        conn.execute("INSERT INTO transactions (account_id, date, amount, name, type, source) VALUES (?, '2026-10-13', 2500, 'Acme Payroll', 'income', 'manual')",
+                     (checking,))
+    client.post("/recurring/track", data={"name": "Payroll", "pattern": "acme payroll", "frequency": "biweekly", "amount": "2500"})
+    page = unescape(client.get("/recurring").text)
+    # Paid on Oct 13, every other week: the next one is Oct 27.
+    assert "Next payday: <strong>Tue, Oct 27</strong>, in 13 days (Payroll, +$2,500.00). Nothing is due before then." in " ".join(page.split())
+    assert '<b>+$2.5K</b>' in page
+    november = client.get("/recurring?month=2026-11").text
+    assert november.count("cal-event income") == 2  # Nov 10 and Nov 24
+    assert client.get("/recurring?month=2026-10").text.count("cal-event income done") == 1  # Oct 13 came
+    assert client.get("/recurring?month=nonsense").status_code == 200
+    conn.close()

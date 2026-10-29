@@ -64,3 +64,35 @@ def test_month_summary_splits_paid_and_still_due(conn):
     summary = recurring.month_summary(conn, recurring.list_recurring(conn, today), today)
     assert summary["paid"] == 15.49  # Netflix on Oct 1; its next charge is in November
     assert summary["due"] == 40.0 and [r["name"] for r in summary["due_items"]] == ["Gym"]
+
+
+def test_charges_come_back_on_their_day_after_a_shorter_month():
+    assert recurring.step(date(2026, 1, 31), "monthly", 1) == date(2026, 2, 28)
+    assert recurring.step(date(2026, 1, 31), "monthly", 2) == date(2026, 3, 31)  # not the 28th
+    assert recurring.step(date(2026, 1, 2), "biweekly", 3) == date(2026, 2, 13)
+    item = {"active": 1, "late": False, "last_date": date(2026, 9, 3), "frequency": "monthly"}
+    assert recurring.occurrences(item, date(2026, 10, 1), date(2027, 1, 1)) == [date(2026, 10, 3), date(2026, 11, 3), date(2026, 12, 3)]
+    assert recurring.occurrences({**item, "active": 0}, date(2026, 10, 1), date(2027, 1, 1)) == []
+    assert recurring.occurrences({**item, "late": True}, date(2026, 10, 1), date(2027, 1, 1)) == []
+
+
+def test_a_month_of_recurring_charges_and_the_next_payday(conn):
+    account = conn.execute("INSERT INTO accounts (name, type) VALUES ('Checking', 'depository')").lastrowid
+    add(conn, account, date(2026, 10, 2), "Acme Payroll", 2000)
+    add(conn, account, date(2026, 9, 25), "Netflix", -15.49)
+    add(conn, account, date(2026, 10, 1), "Rent", -1500)
+    pay, _ = recurring.track(conn, "Payroll", "acme payroll", "biweekly", 2000, None)
+    netflix, _ = recurring.track(conn, "Netflix", "netflix", "monthly", -15.49, None)
+    rent, _ = recurring.track(conn, "Rent", "rent", "monthly", -1500, None)
+    today = date(2026, 10, 10)
+    month = recurring.calendar_month(conn, recurring.list_recurring(conn, today), "2026-10", today)
+    days = [(e["day"].day, e["name"], e["done"]) for e in month["events"]]
+    # What came before today, then what's expected: paychecks every other week, Netflix on the 25th.
+    assert days == [(1, "Rent", True), (2, "Payroll", True), (16, "Payroll", False), (25, "Netflix", False), (30, "Payroll", False)]
+    assert [len(w) for w in month["weeks"]] == [7] * 5 and month["weeks"][0][0]["date"] == date(2026, 9, 27)  # Sunday first
+    assert month["weeks"][1][6]["today"] and not month["weeks"][0][0]["in_month"]
+    # The next payday is the 16th; nothing is due before it. After it, Netflix is.
+    assert month["payday"]["day"] == date(2026, 10, 16) and month["due_before_payday"] == 0
+    later = recurring.calendar_month(conn, recurring.list_recurring(conn, date(2026, 10, 17)), "2026-10", date(2026, 10, 17))
+    assert later["payday"]["day"] == date(2026, 10, 30) and later["due_before_payday"] == 15.49
+    assert [e["item"]["id"] for e in later["before_payday"]] == [netflix] and rent and pay
