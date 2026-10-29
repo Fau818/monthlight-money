@@ -32,18 +32,24 @@ workspace, in the style of Copilot Money's Mac app.
   - The list still groups splits, links, paybacks and transfers the same way, in the same order within a day.
   - Every page still works without JavaScript, except connecting a bank.
 
-## v0.2.x: after v0.2.0
+## v0.2.1: cleaner names
+
+- **Names:**
+  - New transactions lose the confirmation codes, reference numbers and account numbers banks add: "Online transfer
+    to savings Conf# 1A2B3C4D" shows as "Online transfer to savings". When Plaid knows the merchant, its name still
+    comes first.
+  - Renaming a transaction offers to rename the others with that name, now and later, through a rule beside the
+    category rules.
+  - Names changed by hand stay as they are, and the bank's own text stays in the transaction's bank details.
+  - Earlier transactions get the same cleanup once, after a preview, and rules can name new transactions the way the
+    earlier ones are named.
+- **Colors:** each category gets a color of its own, from 13.
+
+## v0.2.x: after v0.2.1
 
 In this order, each step its own release.
 
-1. **Cleaner names.**
-   - New transactions lose the confirmation codes and reference numbers banks add: "Online transfer to savings
-     Conf# 1A2B3C4D" shows as "Online transfer to savings". When Plaid knows the merchant, its name still comes first.
-   - Rename rules beside the category rules: renaming a transaction offers to rename the others with that name, now
-     and later.
-   - Names changed by hand stay as they are, and the bank's own text stays in the transaction's bank details.
-   - Earlier transactions get the same cleanup once, after a preview.
-2. **Filters you can see, selecting and the keyboard.**
+1. **Filters you can see, selecting and the keyboard.**
    - A filter menu has a labeled field for each filter: dates (presets or custom), accounts, categories, tags, type,
      review status and transfers. Amount gets a choice of equals, between, more than or less than.
    - Active filters show as chips you can remove. The list sorts by date or amount, and totals show what's listed as
@@ -51,8 +57,8 @@ In this order, each step its own release.
    - Every row has a checkbox. With two or more ticked, the pane edits them together: category, tags, review,
      exclude, link and combine.
    - ↑ and ↓ move, X selects, R marks reviewed, C changes the category, / searches and Esc closes.
-3. **The other pages** laid out like the transactions: the dashboard, budgets, recurring, accounts and settings.
-4. **Reports: where the money goes.**
+2. **The other pages** laid out like the transactions: the dashboard, budgets, recurring, accounts and settings.
+3. **Reports: where the money goes.**
    - Pick a period: this month, the last 3 or 12 months, year to date, last year, or custom. Totals come by month,
      quarter or year.
    - Show spending, income, net and savings rate, grouped by category, merchant, account or tag.
@@ -65,7 +71,7 @@ In this order, each step its own release.
      - top merchants and biggest expenses
    - Click a bar to see its transactions. Save a report and pin it to the dashboard.
    - It reuses the filter menu.
-5. **Categories and budgets.**
+4. **Categories and budgets.**
    - Budgets move into a Categories page with spending pace and expected recurring charges.
    - Each category gets its own page: history, average, year to date and top merchants.
    - Budget rollover and budgets that differ by month.
