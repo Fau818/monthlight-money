@@ -272,3 +272,16 @@ def test_a_budget_is_set_from_a_month_on_or_for_that_month_alone(conn):
     assert not reports.set_budget(conn, ids["food"], "2026-11", 450)  # the same as it is: nothing written
     assert reports.set_budget(conn, ids["food"], "2026-11", None)
     assert budget("2026-11") is None and budget("2026-10") == 450
+
+
+def test_an_accounts_balance_over_time(conn):
+    setup(conn)
+    card = conn.execute("SELECT * FROM accounts WHERE name = 'Card'").fetchone()
+    assert reports.account_history(conn, dict(card, kept_by_hand=0)) == [("2026-10-01", 250.0)]
+    # Kept by hand: what its transactions had left on it, day by day; on a card, what was owed.
+    gift = conn.execute("INSERT INTO accounts (name, type, source) VALUES ('Gift card', 'other', 'manual')").lastrowid
+    owed = conn.execute("INSERT INTO accounts (name, type, source) VALUES ('Store card', 'credit', 'manual')").lastrowid
+    conn.executemany("INSERT INTO transactions (account_id, date, amount, name, excluded, source) VALUES (?, ?, ?, 'x', ?, 'manual')",
+                     [(gift, "2026-10-01", 50, 0), (gift, "2026-10-03", -20, 0), (gift, "2026-10-03", -5, 1), (owed, "2026-10-02", -40, 0)])
+    assert reports.account_history(conn, {"id": gift, "type": "other", "kept_by_hand": 1}) == [("2026-10-01", 50.0), ("2026-10-03", 30.0)]
+    assert reports.account_history(conn, {"id": owed, "type": "credit", "kept_by_hand": 1}) == [("2026-10-02", 40.0)]

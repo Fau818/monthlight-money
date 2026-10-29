@@ -889,7 +889,8 @@ def test_accounts_can_be_added_archived_or_hidden_and_the_picker_follows(client,
     assert accounts_page.index("<h2>Archived</h2>") < accounts_page.index(f'id="ta{checking}"')  # folded away at the end
     # An account opens with its latest transactions, and saves as its fields change.
     sheet = unescape(client.get(f"/accounts/{card}").text)
-    assert 'data-transaction="a' in sheet and "Latest transactions" in sheet and f"/transactions?account={card}" in sheet
+    assert 'data-transaction="a' in sheet and "The latest 8 of 8" in sheet and f"/transactions?account={card}" in sheet
+    assert "Owed over time" in sheet and "Netflix" in sheet  # a card shows what's owed; its transactions by day
     response = client.post(f"/accounts/{card}", data={"name": "Sapphire", "quiet": "1", "back": f"/accounts/{card}"})
     assert 'value="Sapphire"' in response.text and "Account saved." not in response.text
     assert client.get("/accounts/999").status_code == 404
@@ -932,7 +933,8 @@ def test_the_sidebar_lists_the_accounts_in_use_by_group(client, settings):
     assert "Chase Sapphire ••1234" in shown and "Chase Sapphire ••5555" in shown
     # The account open in the list is lit up, and searching from there keeps the list's filters.
     listing = sidebar(f"/transactions?account={checking}&month=2026-09")
-    assert f'<a href="/transactions?account={checking}" class="active" aria-current="page"' in listing
+    assert f'<a href="/accounts/{checking}" class="active" aria-current="page"' in listing
+    assert f'<a href="/accounts/{checking}" class="active" aria-current="page"' in sidebar(f"/accounts/{checking}")  # its page too
     assert f'<input type="hidden" name="month" value="2026-09"><input type="hidden" name="account" value="{checking}">' in listing
     assert '<input type="hidden"' not in sidebar("/categories").split('class="side-search"')[1].split("</form>")[0]  # elsewhere it searches everything
     # A group stays folded from page to page: app.js keeps the folded ones in a cookie.
@@ -1206,4 +1208,17 @@ def test_a_month_in_review(client, settings, monkeypatch):
     assert "in review</strong>" not in client.get("/").text  # Oct 14: too late
     monkeypatch.setattr(main, "date", type("Early", (date,), {"today": classmethod(lambda cls: cls(2026, 11, 3))}))
     assert "October 2026 in review</strong>" in unescape(client.get("/").text)
+    conn.close()
+
+
+def test_an_account_page_charts_its_balance(client, settings):
+    import_sample(client, settings)
+    conn = sync.connect(settings.db_path)
+    checking = conn.execute("SELECT id FROM accounts WHERE name = 'Acme Checking'").fetchone()[0]
+    with conn:
+        conn.execute("INSERT INTO balance_history (account_id, date, balance) VALUES (?, '2026-10-01', 1800), (?, '2026-10-02', 2100)",
+                     (checking, checking))
+    page = unescape(client.get(f"/accounts/{checking}").text)
+    assert "Balance over time" in page and 'data-plot' in page and "Oct 1" in page and "Oct 2" in page
+    assert "Acme Payroll" in page and "All of them" in page
     conn.close()

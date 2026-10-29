@@ -17,7 +17,7 @@ The app restarts on its own whenever Docker is running. While it runs, it syncs 
 
 ## Finding things
 
-The search field at the top of the sidebar looks through names and notes; on **Transactions** it searches within the filters you picked there. Below the pages, the sidebar lists your accounts by group with their balances: click one to see its transactions, or fold a group away. Hidden and archived accounts aren't listed. On a phone, **Transactions** has its own search field.
+The search field at the top of the sidebar looks through names and notes; on **Transactions** it searches within the filters you picked there. Below the pages, the sidebar lists your accounts by group with their balances: click one for its page (its balance over time, its latest transactions, and for a card how much of its limit is used), or fold a group away. Hidden and archived accounts aren't listed. On a phone, **Transactions** has its own search field.
 
 On **Transactions**, **Filters** opens a field for each filter:
 
@@ -142,7 +142,7 @@ On a transaction, type a tag to add it (an existing one or a new one), or press 
 
 **Transactions → Add transaction** adds a transaction by hand, for cash or an account that isn't connected; only these can be deleted. For a gift card or a store's credit, add an account on **Accounts → Add an account**: refunds that went there and orders it paid for go on it, and the Accounts page shows what's left.
 
-**Archive** an account you don't use any more: its history still counts, but it's no longer offered when you add a transaction. Open an account on **Accounts** to rename, hide or archive it, and to see its latest transactions.
+**Archive** an account you don't use any more: its history still counts, but it's no longer offered when you add a transaction. Open an account, from the sidebar or **Accounts**, to see its balance over time and its latest transactions, and to rename, hide or archive it.
 
 ## Your bank connections
 

@@ -52,7 +52,7 @@
       {% for href, label, name in side_nav %}{{ nav_link(href, label, name) }}{% endfor %}
     </nav>
     {% if side_groups %}
-      {# Accounts in use, by group, as the Accounts page shows their balances; each opens its transactions. #}
+      {# Accounts in use, by group, as the Accounts page shows their balances; each opens its page. #}
       <section class="side-accounts" aria-labelledby="side-accounts-head">
         <h2 id="side-accounts-head">My accounts</h2>
         {% for g in side_groups %}
@@ -60,8 +60,8 @@
             <summary><span class="chev">{{ icon("right") }}</span><span>{{ g.label }}</span><span class="num">{{ g.balance|money }}</span></summary>
             <ul>
               {% for a in g.accounts %}
-                {% set active = filters is defined and filters.account == [a.id|string] %}
-                <li><a href="/transactions?account={{ a.id }}"{% if active %} class="active" aria-current="page"{% endif %}
+                {% set active = request.url.path == "/accounts/" ~ a.id or (filters is defined and filters.account == [a.id|string]) %}
+                <li><a href="/accounts/{{ a.id }}"{% if active %} class="active" aria-current="page"{% endif %}
                        title="{{ a.name }}{% if a.mask %} ••{{ a.mask }}{% endif %}{% if a.institution %} at {{ a.institution }}{% endif %}">
                   <span>{{ a.label }}</span><span class="num">{{ a.balance|money }}</span></a></li>
               {% endfor %}

@@ -1,53 +1,69 @@
 {% extends "base.html" %}
-{% from "_macros.html" import meter, transaction_row, icon with context %}
+{% from "_macros.html" import meter, line_chart, transaction_row, split_head, icon with context %}
 {% block title %}{{ a.name }}{% endblock %}
 {% block content %}
-<p><a class="back" href="{{ back }}">{{ icon("left") }} Back</a></p>
-{# An account (main.account_page): in the pane beside the accounts, or on its own page. Its fields save as they change
-   (app.js), or with Save without JavaScript. #}
+<p><a class="back" href="{{ back }}">{{ icon("left") }} {{ "Accounts" if back == "/accounts" else "Back" }}</a></p>
+{# An account (main.account_page): its balance over time, its latest transactions, and its settings, which save as they
+   change (app.js), or with Save without JavaScript. On its own page, from the sidebar, or in the pane beside the
+   Accounts page. #}
 {% set kinds = {"depository": "Bank account", "credit": "Credit card", "loan": "Loan", "investment": "Investments", "other": "Account"} %}
-<div class="sheet" data-transaction="a{{ a.id }}">
+{% set owed = a.type in ("credit", "loan") %}
+<div class="sheet wide account-sheet" data-transaction="a{{ a.id }}">
   <header class="sheet-bar">
     <h2 class="sheet-kind">{{ kinds.get(a.type, "Account") }}{% if a.subtype and a.type == "depository" %} · {{ a.subtype|capitalize }}{% endif %}</h2>
   </header>
-  <form method="post" action="/accounts/{{ a.id }}" data-autosave data-swap>
+  <form method="post" action="/accounts/{{ a.id }}" id="account-form" data-autosave data-swap>
     <input type="hidden" name="back" value="{{ here }}"><input type="hidden" name="quiet" value="">
-    <section class="sheet-hero">
-      <p class="sheet-date">{{ icon("bank") }} {{ a.institution or "Kept by hand" if a.kept_by_hand else a.institution or "Not connected to a bank" }}{% if a.mask %} ••{{ a.mask }}{% endif %}</p>
-      <h1 class="sheet-name"><input name="name" value="{{ a.name }}" required aria-label="Name"></h1>
-      <div class="sheet-amount">{{ a.balance|money }}</div>
-      <p class="muted small">{% if a.type in ("credit", "loan") %}Owed, as your bank shows it{% elif a.kept_by_hand %}What's left after its transactions{% else %}Balance{% endif %}{% if a.plaid_account_id %} · updated {{ a.balance_updated_at|ago }}{% endif %}</p>
-      {% if a.type == "credit" and a.credit_limit and a.balance is not none %}
+  </form>
+  <section class="sheet-hero">
+    <p class="sheet-date">{{ icon("bank") }} {% if a.kept_by_hand %}Kept by hand{% else %}{{ a.institution or "Not connected to a bank" }}{% endif %}{% if a.mask %} ••{{ a.mask }}{% endif %}</p>
+    <h1 class="sheet-name"><input name="name" value="{{ a.name }}" required aria-label="Name" form="account-form"></h1>
+    <div class="sheet-amount">{{ a.balance|money }}</div>
+    <p class="muted small">{% if owed %}Owed, as your bank shows it{% elif a.kept_by_hand %}What's left after its transactions{% else %}Balance{% endif %}{% if a.plaid_account_id %} · updated {{ a.balance_updated_at|ago }}{% endif %}</p>
+    {% if a.type == "credit" and a.credit_limit and a.balance is not none %}
+      <div class="limit-card">
         {{ meter(a.balance, a.credit_limit, "blue") }}
         <p class="muted small">{{ percent(a.balance, a.credit_limit) }}% of the {{ a.credit_limit|money }} limit used{% if a.available is not none %} · {{ a.available|money }} available{% endif %}</p>
-      {% endif %}
-    </section>
+      </div>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>{{ "Owed over time" if owed else "Balance over time" }}</h2>
+    {% if balance_chart %}
+      {{ line_chart(balance_chart, ("What was owed on " if owed else "The balance of ") ~ a.name ~ ", day by day", height=150) }}
+    {% else %}
+      <p class="empty">{% if a.plaid_account_id %}It fills in as your bank syncs, day by day.{% else %}No balances recorded yet.{% endif %}</p>
+    {% endif %}
+  </section>
+
+  <section class="card list-card account-txns">
+    <header class="month-head"><h2>Transactions</h2>{% if count %}<span class="muted small">The latest {{ shown }} of {{ "{:,}".format(count) }}</span>
+      <a class="month-link" href="/transactions?account={{ a.id }}">All of them {{ icon("right") }}</a>{% endif %}</header>
+    {% for g in days %}
+      <section class="day">
+        <h3 class="day-head"><span>{{ g.label }}</span>{% if g.spent > 0 %}<span>{{ g.spent|money }}</span>{% endif %}</h3>
+        <ul class="txns">{% for t in g.rows %}{% if t.kind == "split" %}{{ split_head(t, here) }}{% else %}{{ transaction_row(t, here, categories) }}{% endif %}{% endfor %}</ul>
+      </section>
+    {% else %}
+      <p class="empty">No transactions on it yet.</p>
+    {% endfor %}
+  </section>
+
+  <section class="card">
+    <h2>Settings</h2>
     <div class="sheet-fields">
       <div class="field-row"><span class="field-label">Hidden</span>
-        <label class="switch"><input type="checkbox" name="hidden" value="1"{% if a.hidden %} checked{% endif %}><span>Left out of every total</span></label></div>
+        <label class="switch"><input type="checkbox" name="hidden" value="1" form="account-form"{% if a.hidden %} checked{% endif %}><span>Left out of every total</span></label></div>
       <div class="field-row"><span class="field-label">Archived</span>
-        <label class="switch"><input type="checkbox" name="archived" value="1"{% if a.archived %} checked{% endif %}><span>No longer used: still counted, not offered for new transactions</span></label></div>
+        <label class="switch"><input type="checkbox" name="archived" value="1" form="account-form"{% if a.archived %} checked{% endif %}><span>No longer used: still counted, not offered for new transactions</span></label></div>
       {% if item %}
         <div class="field-row"><span class="field-label">Connection</span>
           <span>{{ item.institution_name or "Bank" }} · {% if item.status == "ok" %}<span class="status ok">● Connected</span>{% elif item.status == "login_required" %}<span class="status bad">● Needs login</span>{% elif item.status == "needs_match" %}<span class="status warn">● Accounts to match</span>{% else %}<span class="status bad">● Error</span>{% endif %}
             <span class="muted small">, checked {{ item.last_synced_at|ago }}. Log in again or remove it on <a href="/accounts">Accounts</a>.</span></span></div>
       {% endif %}
     </div>
-    <noscript><p><button type="submit" class="primary">Save</button></p></noscript>
-  </form>
-  <section class="card">
-    <div class="card-head"><h2>Latest transactions</h2>{% if count %}<a href="/transactions?account={{ a.id }}">All {{ plural(count, "transaction") }}</a>{% endif %}</div>
-    {% if latest %}
-      <ul class="link-rows">
-        {% for t in latest %}
-          <li><a class="linked" href="/transactions/{{ t.id }}?back={{ here|urlencode }}">
-            <span>{{ t.name }}</span><span class="muted small">{{ t.date|short_date }}{% if t.category_name %} · {{ t.category_name }}{% endif %}</span>
-            <span class="num{% if t.amount > 0 %} money-in{% endif %}">{{ t.amount|amount }}</span></a></li>
-        {% endfor %}
-      </ul>
-    {% else %}
-      <p class="empty">No transactions on it yet.</p>
-    {% endif %}
+    <noscript><p><button type="submit" class="primary" form="account-form">Save</button></p></noscript>
   </section>
 </div>
 {% endblock %}

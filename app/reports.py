@@ -542,3 +542,20 @@ def set_budget(conn: sqlite3.Connection, category_id: int, month: str, amount: f
     conn.execute("INSERT INTO budgets (category_id, month, amount) VALUES (?, ?, ?) "
                  "ON CONFLICT (category_id, month) DO UPDATE SET amount = excluded.amount", (category_id, month, amount))
     return True
+
+
+def account_history(conn: sqlite3.Connection, account: dict) -> list[tuple[str, float]]:
+    """Returns (date, balance) for each day an account's balance is known, shown the way banks show it (what's owed on a
+    card or loan positive): the balances recorded, or for an account kept by hand (net_worth's "kept_by_hand"), what
+    its transactions had left on it by each day they changed it."""
+    if not account.get("kept_by_hand"):
+        return [(r["date"], r["balance"]) for r in conn.execute(
+            "SELECT date, balance FROM balance_history WHERE account_id = ? ORDER BY date", (account["id"],))]
+    sign = -1 if account["type"] in LIABILITY_TYPES else 1
+    out, held = [], 0.0
+    for r in conn.execute(f"""SELECT t.date, sum(t.amount) AS amount FROM transactions t
+                              WHERE t.account_id = ? AND t.excluded = 0 AND {NOT_SPLIT} GROUP BY t.date ORDER BY t.date""",
+                          (account["id"],)):
+        held += r["amount"]
+        out.append((r["date"], round(sign * held, 2) + 0.0))
+    return out

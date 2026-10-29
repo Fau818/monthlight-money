@@ -1639,10 +1639,12 @@ def register_routes(app: FastAPI) -> None:
         account = next((a for g in reports.net_worth(conn)["groups"] for a in g["accounts"] if a["id"] == aid), None)
         if account is None:
             raise HTTPException(404, "Account not found.")
-        latest = conn.execute(f"""SELECT t.*, c.name AS category_name FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
-                                   WHERE t.account_id = ? AND {reports.NOT_SPLIT} ORDER BY t.date DESC, t.id DESC LIMIT 8""", (aid,)).fetchall()
-        count = conn.execute(f"SELECT count(*) FROM transactions t WHERE t.account_id = ? AND {reports.NOT_SPLIT}", (aid,)).fetchone()[0]
-        return render(request, conn, "account_edit.html", a=account, latest=latest, count=count, back=safe_back(back, "/accounts"),
+        today = date.today()
+        rows, count = find_transactions(conn, accounts=[aid], limit=40)
+        history = reports.account_history(conn, account)
+        return render(request, conn, "account_edit.html", a=account, days=group_by_day(rows, today), count=count,
+                      shown=len(rows), back=safe_back(back, "/accounts"), categories=category_options(conn),
+                      balance_chart=balance_chart(history, owed=account["type"] in reports.LIABILITY_TYPES),
                       item=conn.execute("SELECT * FROM plaid_items WHERE item_id = ?", (account["plaid_item_id"],)).fetchone())
 
     @app.post("/accounts/{aid}")
@@ -2749,15 +2751,36 @@ def pinned_reports(conn, today: date) -> list[dict]:
     return out
 
 
+def balance_chart(history: list[tuple[str, float]], owed: bool = False) -> dict | None:
+    """Returns a line chart of an account's balance over the days in `history` (reports.account_history), named for
+    what's owed on a card or loan; None when it has fewer than two days."""
+    if len(history) < 2:
+        return None
+    label = day_namer(history)
+    chart = charts.line_chart([label(day) for day, _ in history],
+                              [{"name": "Owed" if owed else "Balance", "values": [value for _, value in history], "role": "main", "area": True}],
+                              zero=owed)
+    last = len(history) - 1
+    chart["x_ticks"] = [{"label": label(history[i][0]), "left": charts.x_percent(i, len(history))} for i in sorted({0, last // 2, last})]
+    return chart
+
+
+def day_namer(history: list[tuple[str, float]]):
+    """Returns how a chart over `history`'s days names one: like "Oct 18", with the year when the days span more than one."""
+    years = {day[:4] for day, _ in history}
+    return (lambda day: f"{short_date(day)}, {day[:4]}") if len(years) > 1 else short_date
+
+
 def worth_chart(history: list[tuple[str, float]]) -> dict | None:
     """Returns a line chart of net worth over the days in `history` (from reports.net_worth_history); None when it
     has fewer than two days."""
     if len(history) < 2:
         return None
-    chart = charts.line_chart([short_date(day) for day, _ in history],
+    label = day_namer(history)
+    chart = charts.line_chart([label(day) for day, _ in history],
                               [{"name": "Net worth", "values": [value for _, value in history], "role": "main"}], zero=False)
     last = len(history) - 1
-    chart["x_ticks"] = [{"label": short_date(history[i][0]), "left": charts.x_percent(i, len(history))}
+    chart["x_ticks"] = [{"label": label(history[i][0]), "left": charts.x_percent(i, len(history))}
                         for i in sorted({0, last // 2, last})]
     return chart
 
