@@ -83,7 +83,7 @@
         <div class="filter-field">
           <span class="filter-label">Everyday spending</span>
           <label class="check"><input type="checkbox" name="everyday" value="1"{% if filters.everyday %} checked{% endif %}> Leave out what isn't everyday spending</label>
-          <p class="filter-hint">{% if has_everyday %}What you set aside: tuition, say.{% else %}Nothing is set aside yet.{% endif %}
+          <p class="filter-hint">{% if has_everyday %}The big, rare costs you set aside.{% else %}Nothing is set aside yet.{% endif %}
             <a href="/everyday?back={{ here|urlencode }}" data-pane>{{ "Change it" if has_everyday else "Set some aside" }}</a></p>
         </div>
         <div class="filter-field">

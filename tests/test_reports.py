@@ -285,3 +285,10 @@ def test_an_accounts_balance_over_time(conn):
                      [(gift, "2026-10-01", 50, 0), (gift, "2026-10-03", -20, 0), (gift, "2026-10-03", -5, 1), (owed, "2026-10-02", -40, 0)])
     assert reports.account_history(conn, {"id": gift, "type": "other", "kept_by_hand": 1}) == [("2026-10-01", 50.0), ("2026-10-03", 30.0)]
     assert reports.account_history(conn, {"id": owed, "type": "credit", "kept_by_hand": 1}) == [("2026-10-02", 40.0)]
+
+
+def test_a_change_needs_something_to_compare():
+    from app.main import change
+    assert change(0, 0) is None
+    assert change(120, 100) == {"diff": 20, "percent": 20}
+    assert change(50, 0) == {"diff": 50, "percent": None}  # nothing before: no percentage

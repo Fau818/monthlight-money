@@ -1247,3 +1247,33 @@ def test_recurring_has_a_calendar_of_charges_and_paydays(client, settings):
     assert client.get("/recurring?month=2026-10").text.count("cal-event income done") == 1  # Oct 13 came
     assert client.get("/recurring?month=nonsense").status_code == 200
     conn.close()
+
+
+def test_the_new_pages_handle_odd_input_and_the_way_back(client, settings):
+    import_sample(client, settings)
+    conn = sync.connect(settings.db_path)
+    shell = conn.execute("SELECT id FROM transactions WHERE name = 'Shell'").fetchone()[0]
+    rid = conn.execute("SELECT id FROM recurring WHERE name = 'Netflix'").fetchone()[0]
+    # A set-aside transaction counts as everyday spending again.
+    client.post(f"/everyday/transactions/{shell}", data={"aside": "1"})
+    text = unescape(client.post(f"/everyday/transactions/{shell}", data={"aside": "0", "back": "/"}).text)
+    assert "“Shell” counts as everyday spending again." in text and reports.everyday(conn)["id"] == []
+    # Leaving out what's uncategorized leaves out spending with no category, never income.
+    with conn:
+        conn.execute("UPDATE transactions SET category_id = NULL WHERE id = ?", (shell,))
+    text = unescape(client.get("/reports?not_category=none").text)
+    assert "$141.77 in all" in text and "Not Uncategorized" in text and "$2,500.00" in text
+    assert client.get("/reports?over=lots", follow_redirects=False).headers["location"] == "/reports"  # unreadable: dropped
+    assert "Mar 5, 2025 – Oct 10, 2026" in unescape(client.get("/reports?period=custom&from=2025-03-05&to=2026-10-10").text)
+    # Odd values, and what's gone, lead back with a message rather than an error.
+    assert "Pick a frequency" in client.post("/recurring/track", data={"name": "X", "pattern": " ", "frequency": "daily"}).text
+    form = {"name": "Netflix", "frequency": "daily", "amount": "-15.49", "back": f"/recurring/{rid}"}
+    assert "Unknown frequency." in client.post(f"/recurring/{rid}", data=form).text
+    assert "isn't an amount" in unescape(client.post(f"/recurring/{rid}", data={**form, "frequency": "monthly", "amount": "lots"}).text)
+    assert client.post("/categories/999/budget", data={"amount": "10"}).status_code == 404
+    assert client.post("/reports/saved/999/delete", follow_redirects=False).headers["location"] == "/reports"
+    # A category with nothing spent and no budget in a month still has its page.
+    gas = conn.execute("SELECT id FROM categories WHERE name = 'Gas'").fetchone()[0]
+    page = unescape(client.get(f"/categories/{gas}?month=2026-08").text)
+    assert "Spent in August" in page and "No transactions in Gas in August." in page
+    conn.close()
