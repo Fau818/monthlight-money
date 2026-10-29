@@ -20,13 +20,34 @@ def test_category_looks_prefer_the_users_pick_then_the_group(conn):
     mine = conn.execute("INSERT INTO categories (name, emoji, color) VALUES ('Groceries', '🥦', 'aqua')").lastrowid
     odd = conn.execute("INSERT INTO categories (name, color) VALUES ('Zzyzx', 'not-a-color')").lastrowid
     result = looks.category_looks(conn)
-    assert result[snacks] == {"emoji": "🍔", "color": "orange"}  # nothing in "Snacks" itself, so its group's
+    assert result[food] == {"emoji": "🍔", "color": "orange"}
+    assert result[snacks]["emoji"] == "🍔"  # nothing in "Snacks" itself, so its group's
+    assert result[snacks]["color"] not in ("orange", "aqua")  # but a color of its own
     assert result[mine] == {"emoji": "🥦", "color": "aqua"}
     assert result[odd]["emoji"] == looks.FALLBACK_EMOJI and result[odd]["color"] in looks.FALLBACK_COLORS
     assert looks.transaction_look(result, "income", mine) == looks.INCOME
     assert looks.transaction_look(result, "transfer", None) == looks.TRANSFER
     assert looks.transaction_look(result, "regular", None) == looks.UNCATEGORIZED
     assert looks.transaction_look(result, "regular", mine) == result[mine]
+
+
+def test_categories_get_colors_of_their_own(conn):
+    mine = conn.execute("INSERT INTO categories (name, color) VALUES ('Lunch', 'orange')").lastrowid
+    ids = [conn.execute("INSERT INTO categories (name) VALUES (?)", (name,)).lastrowid
+           for name in ("Dinner", "Takeout", "Zzyzx", "Other", "Misc")]
+    result = looks.category_looks(conn)
+    assert result[mine]["color"] == "orange"  # the user's pick, which the others then go without
+    colors = [result[cid]["color"] for cid in ids]
+    assert len(set(colors[:3])) == 3 and "orange" not in colors[:3]
+    assert colors[3:] == ["gray", "gray"]  # gray isn't meant to stand out, so it's shared
+    assert result[ids[0]]["emoji"] == result[ids[1]]["emoji"] == "🍔"  # only the color changes
+
+
+def test_categories_that_hold_transactions_choose_colors_before_their_groups(conn):
+    group = conn.execute("INSERT INTO categories (name) VALUES ('Coffee & Tea')").lastrowid
+    child = conn.execute("INSERT INTO categories (name, parent_id) VALUES ('Cafes', ?)", (group,)).lastrowid
+    result = looks.category_looks(conn)
+    assert result[child]["color"] == "brown" and result[group]["color"] != "brown"
 
 
 def test_older_databases_get_the_new_columns(tmp_path):

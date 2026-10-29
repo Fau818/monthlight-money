@@ -13,7 +13,7 @@
 {% if cats %}
   <section class="card">
     <h2>Categories</h2>
-    <p class="muted small">Each category gets an emoji and a color from its name. Change them, or leave the emoji empty to go back to the automatic one.</p>
+    <p class="muted small">Each category gets an emoji and a color from its name, in a color of its own while there are colors left. Change them, or leave the emoji empty to go back to the automatic one.</p>
     <ul class="cat-manage">
       {% for c in cats %}
         {% set look = looks[c.id] %}

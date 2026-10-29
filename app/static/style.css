@@ -1,6 +1,7 @@
 /* A theme like Copilot Money's: navy in dark mode, with a light mode of the same blue-grays. Text keeps at least 4.5:1
    contrast on every surface it sits on. The data-viz palette gives charts and categories their colors: --c-* are its
-   eight colors in their fixed order plus a gray, validated for color blindness and for contrast on these surfaces. */
+   eight colors in their fixed order, validated for color blindness and for contrast on these surfaces, then five more
+   that only mark categories and tags (always beside their names; each pill's text keeps 4.5:1), and a gray. */
 :root {
   color-scheme: light;
   --font: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
@@ -34,7 +35,8 @@
   --notice: #e8f0fc;
   --alert: #fdf1dc;
   --c-blue: #2a78d6; --c-orange: #eb6834; --c-aqua: #1baf7a; --c-yellow: #eda100;
-  --c-magenta: #e87ba4; --c-green: #008300; --c-violet: #6250d6; --c-red: #e34948; --c-gray: #7d8ca0;
+  --c-magenta: #e87ba4; --c-green: #008300; --c-violet: #6250d6; --c-red: #e34948;
+  --c-lime: #82a000; --c-purple: #a543b5; --c-teal: #00868a; --c-brown: #8e5224; --c-sky: #58b5ed; --c-gray: #7d8ca0;
   --pill-wash: 13%; --pill-ink-share: 60%; --pill-ink-base: #000; --pill-hover: 0.96;  /* a category pill (.pill) */
   --sidebar: 264px;
   --pane: 440px;            /* an open transaction beside the list */
@@ -73,14 +75,17 @@
     --notice: #0a1d36;
     --alert: #2b2110;
     --c-blue: #3987e5; --c-orange: #d95926; --c-aqua: #199e70; --c-yellow: #c98500;
-    --c-magenta: #d55181; --c-green: #008300; --c-violet: #9085e9; --c-red: #e66767; --c-gray: #7d8ca0;
+    --c-magenta: #d55181; --c-green: #008300; --c-violet: #9085e9; --c-red: #e66767;
+    --c-lime: #8ead20; --c-purple: #c16acf; --c-teal: #008c90; --c-brown: #a97248; --c-sky: #6fc1f6; --c-gray: #7d8ca0;
     --pill-wash: 18%; --pill-ink-share: 80%; --pill-ink-base: #fff; --pill-hover: 1.25;
   }
 }
 
 .tint-blue { --tint: var(--c-blue); } .tint-orange { --tint: var(--c-orange); } .tint-aqua { --tint: var(--c-aqua); }
 .tint-yellow { --tint: var(--c-yellow); } .tint-magenta { --tint: var(--c-magenta); } .tint-green { --tint: var(--c-green); }
-.tint-violet { --tint: var(--c-violet); } .tint-red { --tint: var(--c-red); } .tint-gray { --tint: var(--c-gray); }
+.tint-violet { --tint: var(--c-violet); } .tint-red { --tint: var(--c-red); } .tint-lime { --tint: var(--c-lime); }
+.tint-purple { --tint: var(--c-purple); } .tint-teal { --tint: var(--c-teal); } .tint-brown { --tint: var(--c-brown); }
+.tint-sky { --tint: var(--c-sky); } .tint-gray { --tint: var(--c-gray); }
 
 /* ---- base ---- */
 * { box-sizing: border-box; }
