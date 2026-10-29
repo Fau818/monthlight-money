@@ -37,6 +37,7 @@
   --c-blue: #2a78d6; --c-orange: #eb6834; --c-aqua: #1baf7a; --c-yellow: #eda100;
   --c-magenta: #e87ba4; --c-green: #008300; --c-violet: #6250d6; --c-red: #e34948;
   --c-lime: #82a000; --c-purple: #a543b5; --c-teal: #00868a; --c-brown: #8e5224; --c-sky: #58b5ed; --c-gray: #7d8ca0;
+  --aside-stripe: #9aa8b8; --aside-bg: #e6ebf1;  /* spending set aside from everyday spending, drawn hatched */
   --pill-wash: 13%; --pill-ink-share: 60%; --pill-ink-base: #000; --pill-hover: 0.96;  /* a category pill (.pill) */
   --sidebar: 264px;
   --pane: 440px;            /* an open transaction beside the list */
@@ -77,6 +78,7 @@
     --c-blue: #3987e5; --c-orange: #d95926; --c-aqua: #199e70; --c-yellow: #c98500;
     --c-magenta: #d55181; --c-green: #008300; --c-violet: #9085e9; --c-red: #e66767;
     --c-lime: #8ead20; --c-purple: #c16acf; --c-teal: #008c90; --c-brown: #a97248; --c-sky: #6fc1f6; --c-gray: #7d8ca0;
+    --aside-stripe: #4a6383; --aside-bg: #0c1a2c;
     --pill-wash: 18%; --pill-ink-share: 80%; --pill-ink-base: #fff; --pill-hover: 1.25;
   }
 }
@@ -394,6 +396,7 @@ ul.txns { container-type: inline-size; }
 /* ---- dashboard ---- */
 .dash { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 16px; }
 @media (min-width: 1180px) { .dash { grid-template-columns: minmax(0, 1fr) 360px; } }
+@media (min-width: 1280px) and (max-width: 1719px) { body.pane-open .dash { grid-template-columns: minmax(0, 1fr); } }  /* beside the pane */
 .spend-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px 24px; flex-wrap: wrap; }
 .spend-sub { display: flex; flex-direction: column; gap: 2px; font-size: 0.9rem; }
 .kpis { display: flex; gap: 24px; margin: 4px 0 0; }
@@ -487,6 +490,82 @@ ul.txns { container-type: inline-size; }
 .col-ticks { display: flex; gap: 2px; margin-left: 46px; padding-top: 6px; border-top: 1px solid var(--baseline); font-size: 0.72rem; color: var(--muted); }
 .col-ticks span { flex: 1; text-align: center; line-height: 1.25; }
 .col-ticks small { display: block; font-size: 0.65rem; }
+/* Stacked bars (a report): each column's parts, the biggest series at the bottom, with a 2px gap of the card's surface
+   between them and a rounded top. A part opens its transactions, and the rest of the column all of them; the column's
+   readout lists its parts. */
+.stack-col .col-hit { position: absolute; inset: -18px 0 0; border-radius: 6px; }
+.stack-col:hover .col-hit, .stack-col .col-hit:focus-visible { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.stack-bar { position: relative; z-index: 1; display: flex; flex-direction: column-reverse; width: min(28px, 70%); min-height: 2px; pointer-events: none; }
+.seg { display: block; flex: none; min-height: 1px; background: var(--tint); pointer-events: auto; }
+.seg + .seg { border-bottom: 2px solid var(--surface); }
+.stack-bar > .seg:last-child { border-radius: 4px 4px 0 0; }
+.stack-bar:hover .seg:not(:hover) { opacity: 0.45; }
+.seg:focus-visible { outline: 2px solid var(--accent-text); outline-offset: 1px; }
+.stack-col:focus-within .tip { display: block; }
+.columns .stack-col .tip { top: 0; bottom: auto; left: calc(50% + 18px); right: auto; transform: none; }  /* beside its column */
+.columns .stack-col.flip .tip { left: auto; right: calc(50% + 18px); }
+.tip .tip-total { margin-top: 2px; padding-top: 3px; border-top: 1px solid color-mix(in srgb, var(--popup-ink) 25%, transparent); }
+.key.box { width: 10px; height: 10px; border-radius: 3px; background: var(--tint, var(--accent)); vertical-align: -1px; }
+.marker.average { border-top-style: dashed; opacity: 0.7; z-index: 2; pointer-events: none; }
+.marker.average span { left: auto; right: 0; }
+.stacked .columns-plot { height: 240px; }
+.stacked .legend { margin-top: 10px; }
+
+/* ---- reports ---- */
+.page-title { min-width: 0; }
+.page-title p { margin: 4px 0 0; font-size: 0.9rem; }
+.head-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.head-actions button.on { border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: var(--accent-wash); color: var(--accent-text); }
+.report-menu > summary { list-style: none; cursor: pointer; }
+.report-menu > summary::-webkit-details-marker { display: none; }
+.report-menu .menu { z-index: 8; width: min(300px, calc(100vw - 32px)); padding: 12px; }
+.menu-form { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.menu-form label { display: flex; flex-direction: column; gap: 4px; font-size: 0.85rem; font-weight: 500; }
+.saved-reports { display: flex; flex-wrap: wrap; gap: 6px; margin: -6px 0 14px; }
+.saved-reports .icon { width: 14px; height: 14px; }
+.custom-dates { display: none; align-items: center; gap: 6px; font-size: 0.85rem; }
+.custom-dates input { min-height: 32px; padding: 2px 8px; border-radius: 999px; font-size: 0.85rem; }
+.filters:has(option[value=custom]:checked) .custom-dates { display: inline-flex; }
+.report-dates > select { max-width: 240px; }
+.kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px 24px; margin: 0; }
+.kpi { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.kpi dt { color: var(--muted); font-size: 0.8rem; font-weight: 500; }
+.kpi dd { margin: 0 0 2px; font-size: 1.45rem; font-weight: 650; letter-spacing: -0.015em; font-variant-numeric: tabular-nums; }
+.kpi-change { font-size: 0.78rem; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.report-lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 0 16px; }
+.bar-list { list-style: none; margin: 0; padding: 0; }
+.bar-list li { display: flex; align-items: center; gap: 6px; }
+.bar-list li + li { border-top: 1px solid var(--border); }
+.bar-row { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 9px 0; color: var(--ink); }
+.bar-row:hover { text-decoration: none; }
+.bar-row:hover .bar-name { text-decoration: underline; }
+.bar-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-row .num { font-weight: 600; }
+.bar-track { height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--accent) 16%, var(--surface)); overflow: hidden; align-self: center; }
+.bar-track span { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+.bar-row .small { text-align: right; }
+.icon-btn.leave-out { flex: none; width: 30px; height: 30px; color: var(--muted); }
+.icon-btn.leave-out .icon { width: 16px; height: 16px; }
+.icon-btn.leave-out:hover { color: var(--critical-text); }
+.big-rows li { gap: 10px; }
+.report-table td:first-child { white-space: nowrap; }
+.report-table .table-total td { border-top: 1px solid var(--baseline); font-weight: 600; }
+.everyday-form { display: flex; flex-direction: column; gap: 18px; margin-bottom: 16px; }
+.everyday-form .filter-list { max-height: 260px; }
+/* The dashboard's months, with Everyday on: each bar's set-aside part on top of its everyday part, hatched gray. */
+.col .bar .bar-aside { position: absolute; left: 0; right: 0; top: 0; border-radius: 4px 4px 0 0; border-bottom: 2px solid var(--surface);
+  background: repeating-linear-gradient(135deg, var(--aside-stripe) 0 2px, var(--aside-bg) 2px 5px); }
+.key.aside-key { background: repeating-linear-gradient(135deg, var(--aside-stripe) 0 2px, var(--aside-bg) 2px 4px); box-shadow: inset 0 0 0 1px var(--aside-stripe); }
+.card-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 14px; }
+.card-tools .chip { min-height: 28px; padding: 0 10px; font-size: 0.8rem; }
+.card-tools .chip .icon { width: 14px; height: 14px; }
+.pinned-report .card-head h2 .icon { width: 16px; height: 16px; color: var(--muted); }
+.pinned-report > p { margin: -4px 0 6px; }
+.columns-chart.mini { margin-top: 4px; }
+.columns-chart.mini .columns-plot { height: 80px; margin: 8px 0 0; }
+.columns-chart.mini .col-ticks { margin-left: 0; }
+.columns-chart.mini .col .bar { background: color-mix(in srgb, var(--accent) 70%, var(--surface)); }
+.columns-chart.mini .col:hover .bar { background: var(--accent); }
 
 /* ---- forms and detail pages ---- */
 .sheet { max-width: 640px; margin: 0 auto; }

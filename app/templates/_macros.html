@@ -26,6 +26,10 @@
     {%- elif name == "filter" -%}<path d="M4 6.5h16M7 12h10M10 17.5h4"/>
     {%- elif name == "sort" -%}<path d="M8 4.5v15m0 0-3-3m3 3 3-3M16 19.5v-15m0 0-3 3m3-3 3 3"/>
     {%- elif name == "calendar" -%}<rect x="4" y="5.5" width="16" height="14" rx="2"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4"/>
+    {%- elif name == "chart" -%}<path d="M4.5 20h15M7 16.5v-5M11 16.5V6.5M15 16.5v-7M19 16.5V4"/>
+    {%- elif name == "pin" -%}<path d="M9.5 3.5h5l-.8 5.2 3.3 3.3v1.5H7v-1.5l3.3-3.3zM12 13.5v7"/>
+    {%- elif name == "sun" -%}<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4"/>
+    {%- elif name == "moon" -%}<path d="M19.5 14.6A8 8 0 0 1 9.4 4.5a8 8 0 1 0 10.1 10.1z"/>
     {%- endif -%}
   </svg>
 {%- endmacro %}
@@ -230,6 +234,40 @@
           </table>
         </div>
       </details>
+    {% endif %}
+  </figure>
+{% endmacro %}
+
+{# Stacked bars from main.report_view: a column for each month, quarter or year, its parts from the biggest series at the
+   bottom, a gap between them; each part opens its transactions in the pane (app.js), and so does the rest of its
+   column, with all of them. A column's readout lists its parts from the top, with its whole. The keys reach each column
+   (its readout shows), and the table each part. #}
+{% macro stacked_chart(chart, series, title) %}
+  <figure class="chart stacked">
+    <div class="columns-plot" role="group" aria-label="{{ title }}">
+      {% for t in chart.ticks %}<div class="gridline" style="top: {{ t.top }}%"><span>{{ t.label }}</span></div>{% endfor %}
+      {% if chart.average %}<div class="marker average" style="top: {{ chart.average.top }}%"><span>Average {{ chart.average.value|compact_money }}</span></div>{% endif %}
+      <div class="columns">
+        {% for col in chart.columns %}
+          <div class="col stack-col{% if loop.index0 >= chart.columns|length / 2 %} flip{% endif %}">
+            <a class="col-hit" href="{{ col.link }}" data-pane aria-label="{{ col.label }}: {{ col.total|money }} in all"></a>
+            <div class="stack-bar" style="height: {{ col.height }}%">
+              {%- for part in col.segments if part.share > 0 -%}
+                <a class="seg tint-{{ part.color }}" href="{{ part.link }}" data-pane tabindex="-1" style="height: {{ part.share }}%" aria-label="{{ col.label }}, {{ part.label }}: {{ part.value|money }}"></a>
+              {%- endfor -%}
+            </div>
+            <div class="tip" aria-hidden="true">
+              <div class="tip-title">{{ col.label }}</div>
+              {% for part in col.segments|reverse if part.value %}<div class="tip-row"><i class="key box tint-{{ part.color }}"></i><b>{{ part.value|money }}</b><span>{{ part.label }}</span></div>{% endfor %}
+              <div class="tip-row tip-total"><b>{{ col.total|money }}</b><span>in all</span></div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="col-ticks" aria-hidden="true">{% for col in chart.columns %}<span>{{ col.tick }}{% if col.year %}<small>{{ col.year }}</small>{% endif %}</span>{% endfor %}</div>
+    {% if series|length > 1 %}
+      <figcaption class="legend">{% for s in series %}<span><i class="key box tint-{{ s.color }}"></i>{% if s.emoji %}{{ s.emoji }} {% endif %}{{ s.label }}</span>{% endfor %}</figcaption>
     {% endif %}
   </figure>
 {% endmacro %}

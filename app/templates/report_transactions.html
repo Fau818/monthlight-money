@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% from "_macros.html" import badge, icon with context %}
+{% block title %}{{ label or "Transactions" }} · {{ when }}{% endblock %}
+{% block content %}
+<p><a class="back" href="{{ back }}">{{ icon("left") }} Back to the report</a></p>
+{# What a part of a report's chart adds up (main.report_transactions): in the pane beside the report, or on its own page. #}
+<div class="sheet" data-transaction="report">
+  <header class="sheet-bar"><h2 class="sheet-kind">{{ "Spending" if show == "spending" else "Income" }}</h2></header>
+  <section class="sheet-hero">
+    <p class="sheet-date">{{ icon("calendar") }} {{ when }}</p>
+    <h1 class="sheet-name">{{ label or "All of it" }}</h1>
+    <div class="sheet-amount">{{ total|money }}</div>
+    <p class="muted small">{{ plural(rows|length, "transaction") }}{% if several_tags %}, each with a tag of those folded together{% endif %}</p>
+  </section>
+  <section class="card">
+    {% if rows %}
+      <ul class="link-rows">
+        {% for r in rows %}
+          <li>
+            {{ badge(transaction_look(looks, "regular" if show == "spending" else "income", r.category_id), "small") }}
+            <a class="linked" href="/transactions/{{ r.id }}?back={{ back|urlencode }}">
+              <span>{{ r.name }}</span>
+              <span class="muted small">{{ r.day|short_date }}{% if r.day[:4] != when[-4:] %}, {{ r.day[:4] }}{% endif %} · {{ account_labels.get(r.own_account_id, "") }}{% if r.reimburses_id %} · pays back a purchase{% endif %}</span>
+              <span class="num{% if r.amount > 0 %} money-in{% endif %}">{{ r.amount|amount }}</span></a>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="empty">Nothing here.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

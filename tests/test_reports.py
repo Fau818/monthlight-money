@@ -1,6 +1,6 @@
 from datetime import date
 
-from app import reports
+from app import reports, tags
 
 
 def setup(conn):
@@ -123,3 +123,111 @@ def test_a_payback_counts_with_the_purchase_it_pays_back(conn):
     assert [(n["name"], n["spent"]) for n in reports.category_spending(conn, "2026-03")] == [("Food", 30.0)]
     assert reports.daily_spending(conn, "2026-03")[29] == 30.0
     assert [m["spent"] for m in reports.monthly_series(conn, 2, "2026-04")] == [30.0, 0.0]
+
+
+def report_setup(conn):
+    """Two months of made-up spending: a group with a subcategory, a payback, a split, tags, and a hidden account."""
+    card = conn.execute("INSERT INTO accounts (name, type) VALUES ('Card', 'credit')").lastrowid
+    checking = conn.execute("INSERT INTO accounts (name, type) VALUES ('Checking', 'depository')").lastrowid
+    hidden = conn.execute("INSERT INTO accounts (name, type, hidden) VALUES ('Old', 'depository', 1)").lastrowid
+    food = conn.execute("INSERT INTO categories (name) VALUES ('Food')").lastrowid
+    groceries = conn.execute("INSERT INTO categories (name, parent_id) VALUES ('Groceries', ?)", (food,)).lastrowid
+    school = conn.execute("INSERT INTO categories (name) VALUES ('School')").lastrowid
+    add = lambda account, day, amount, name, category=None, **extra: conn.execute(
+        f"INSERT INTO transactions (account_id, date, amount, name, category_id, source{''.join(', ' + k for k in extra)}) "
+        f"VALUES (?, ?, ?, ?, ?, 'manual'{', ?' * len(extra)})", (account, day, amount, name, category, *extra.values())).lastrowid
+    ids = {
+        "grocer": add(card, "2026-09-03", -80.0, "Green Grocer", groceries),
+        "cafe": add(card, "2026-09-04", -20.0, "Corner Cafe", food),
+        "tuition": add(checking, "2026-09-10", -1500.0, "City College", school),
+        "dinner": add(card, "2026-09-20", -90.0, "Noodle Bar", food),
+        "pay": add(checking, "2026-09-15", 3000.0, "Payroll", None, type="income"),
+        "grocer2": add(card, "2026-10-02", -60.0, "green grocer", groceries),
+        "order": add(card, "2026-10-05", -50.0, "Megastore", None),
+        "hidden": add(hidden, "2026-10-06", -999.0, "Hidden", food),
+    }
+    ids["friend"] = add(checking, "2026-10-01", 30.0, "Zelle from a friend", food, reimburses_id=ids["dinner"])  # counts in September
+    ids["part1"] = conn.execute("INSERT INTO transactions (account_id, date, amount, name, category_id, split_from_id, source) "
+                                "VALUES (?, '2026-10-05', -30, 'Soap', ?, ?, 'split')", (card, groceries, ids["order"])).lastrowid
+    ids["part2"] = conn.execute("INSERT INTO transactions (account_id, date, amount, name, category_id, split_from_id, source) "
+                                "VALUES (?, '2026-10-05', -20, 'Snacks', ?, ?, 'split')", (card, food, ids["order"])).lastrowid
+    trip = tags.get_or_create(conn, "Trip")
+    tags.add(conn, trip, [ids["dinner"], ids["part2"]])
+    return {"card": card, "checking": checking, "food": food, "groceries": groceries, "school": school, "trip": trip, **ids}
+
+
+def test_a_report_adds_up_by_column_and_series(conn):
+    ids = report_setup(conn)
+    rows = reports.counted(conn, "2026-09-01", "2026-11-01")
+    # Counted as the dashboard counts: the payback in September with its purchase, the split by its parts, no hidden account.
+    assert round(sum(r["value"] for r in rows), 2) == reports.month_totals(conn, "2026-09")["spent"] + reports.month_totals(conn, "2026-10")["spent"]
+    groups = reports.category_groups(conn)
+    data = reports.grouped(rows, ["2026-09", "2026-10"], "month", "category", groups)
+    by_key = {s["key"]: s for s in data["series"]}
+    assert set(by_key) == {str(ids["food"]), str(ids["school"])}  # a subcategory adds up in its group
+    assert by_key[str(ids["food"])]["values"] == {"2026-09": 160.0, "2026-10": 110.0}  # 80 + 20 + 90 - 30, then 60 + 30 + 20
+    assert [s["key"] for s in data["series"]] == [str(ids["school"]), str(ids["food"])]  # biggest first
+    merchants = reports.grouped(rows, ["2026-09", "2026-10"], "month", "merchant", groups)
+    assert {s["key"]: s["total"] for s in merchants["series"]}["green grocer"] == 140.0  # whatever the case
+    assert {s["key"]: s["total"] for s in merchants["series"]}["megastore"] == 50.0  # a split's parts go by its name
+    assert {s["key"]: s["total"] for s in merchants["series"]}["noodle bar"] == 60.0  # a payback by its purchase's
+    accounts = {s["key"]: s["total"] for s in reports.grouped(rows, [], "month", "account", groups)["series"]}
+    assert accounts == {str(ids["card"]): 270.0, str(ids["checking"]): 1500.0}  # the payback with its purchase's card
+    tagged = {s["key"]: s["total"] for s in reports.grouped(rows, [], "month", "tag", groups)["series"]}
+    assert tagged == {str(ids["trip"]): 80.0, "none": 1690.0}  # the payback goes by its purchase's tags too
+    income = reports.counted(conn, "2026-09-01", "2026-11-01", "income")
+    assert [r["value"] for r in income] == [3000.0]
+
+
+def test_a_report_leaves_out_what_it_is_told(conn):
+    ids = report_setup(conn)
+    spent = lambda **leave: round(sum(r["value"] for r in reports.counted(conn, "2026-09-01", "2026-11-01", leave=leave)), 2)
+    assert spent() == 1770.0
+    assert spent(category=[str(ids["food"])]) == 1500.0  # a group with its subcategories
+    assert spent(category=[str(ids["groceries"])]) == 1600.0  # 80 + 60 + 30 left out
+    assert spent(account=[ids["card"]]) == 1500.0  # the payback, in checking, goes with its purchase on the card
+    assert spent(tag=[ids["trip"]]) == 1690.0  # the dinner, its payback and the tagged part
+    assert spent(merchant=["GREEN GROCER", "megastore"]) == 1580.0
+    assert spent(id=[ids["dinner"]]) == 1710.0  # with its payback
+    assert spent(id=[ids["order"]]) == 1720.0  # a split, with its parts
+    assert spent(over=1000) == 270.0
+    assert spent(over=60) == 130.0  # the 90 dinner and its payback go together; 60 itself stays
+    assert reports.totals(conn, "2026-09-01", "2026-10-01", {"category": [str(ids["school"])]}) == \
+        {"spent": 160.0, "income": 3000.0, "net": 2840.0, "rate": 94.7}
+    merged = reports.merge_leave_outs({"tag": [1], "over": 500}, {"tag": [1, 2], "over": 100})
+    assert merged["tag"] == [1, 2] and merged["over"] == 100
+
+
+def test_past_eight_series_the_smallest_fold_into_other(conn):
+    rows = [{"day": "2026-10-01", "value": float(v), "merchant": f"Shop {v}", "category_id": None, "account_id": 1, "tags": []}
+            for v in range(1, 11)]
+    data = reports.grouped(rows, ["2026-10"], "month", "merchant", {})
+    assert [s["key"] for s in data["series"]] == ["shop 10", "shop 9", "shop 8", "shop 7", "shop 6", "shop 5", "shop 4", "other"]
+    assert data["series"][-1]["total"] == 6.0 and data["folded"] == ["shop 3", "shop 2", "shop 1"]
+
+
+def test_columns_are_months_quarters_or_years():
+    assert [reports.column_of("2026-02-14", by) for by in ("month", "quarter", "year")] == ["2026-02", "2026-Q1", "2026"]
+    assert reports.column_of("2026-12", "quarter") == "2026-Q4"
+    assert reports.column_range("2026-Q2") == ("2026-04-01", "2026-07-01")
+    assert reports.column_range("2026-Q4") == ("2026-10-01", "2027-01-01")
+    assert reports.column_range("2026") == ("2026-01-01", "2027-01-01")
+    assert reports.column_range("2026-09") == ("2026-09-01", "2026-10-01")
+
+
+def test_the_biggest_come_first(conn):
+    ids = report_setup(conn)
+    assert [r["id"] for r in reports.biggest(conn, "2026-09-01", "2026-11-01", limit=3)] == [ids["tuition"], ids["dinner"], ids["grocer"]]
+    dinner = next(r for r in reports.biggest(conn, "2026-09-01", "2026-11-01") if r["id"] == ids["dinner"])
+    assert dinner["paid_back"] == 30.0
+    assert [r["name"] for r in reports.biggest(conn, "2026-09-01", "2026-11-01", "income")] == ["Payroll"]
+
+
+def test_what_is_set_aside_from_everyday_spending_is_kept(conn):
+    assert reports.everyday(conn) == reports.no_leave_outs()
+    reports.set_everyday(conn, {"category": ["3"], "id": [7], "over": 2000.0, "tag": []})
+    assert reports.everyday(conn) == {**reports.no_leave_outs(), "category": ["3"], "id": [7], "over": 2000.0}
+    conn.execute("UPDATE meta SET value = '[1, 2' WHERE key = 'everyday'")  # unreadable: nothing set aside
+    assert reports.everyday(conn) == reports.no_leave_outs()
+    conn.execute("""UPDATE meta SET value = '{"id": [1, {"x": 2}], "over": "lots"}' WHERE key = 'everyday'""")
+    assert reports.everyday(conn) == {**reports.no_leave_outs(), "id": [1]}

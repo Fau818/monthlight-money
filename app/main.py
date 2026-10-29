@@ -10,12 +10,13 @@ import math
 import os
 import sqlite3
 import threading
+import zlib
 from collections import Counter
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
 from itertools import pairwise
 from pathlib import Path
-from urllib.parse import quote, unquote, urlencode, urlsplit
+from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit
 
 from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
@@ -32,11 +33,13 @@ from .plaid_client import PlaidError
 log = logging.getLogger("monthlight")
 HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=HERE / "templates")
-# (path, label, icon). The main pages are also the tab bar on a phone; the others sit under More there.
+# (path, label, icon). The main pages are also the tab bar on a phone; the others sit under More there, Reports first.
 NAV = [
     ("/", "Dashboard", "home"), ("/transactions", "Transactions", "list"), ("/budgets", "Budgets", "pie"),
     ("/recurring", "Recurring", "repeat"), ("/accounts", "Accounts", "bank"),
 ]
+REPORTS_NAV = ("/reports", "Reports", "chart")
+SIDE_NAV = NAV[:2] + [REPORTS_NAV] + NAV[2:]
 MORE_NAV = [("/categories", "Categories & rules", "tag"), ("/import", "Import", "download"), ("/settings", "Settings", "sliders")]
 FOLDED_COOKIE = "sidebar_folded"  # the account groups folded in the sidebar, by kind: "credit,loan" (app.js sets it)
 PAGE_SIZE = 200
@@ -154,7 +157,8 @@ templates.env.filters.update(
 # Part of the script and stylesheet URLs, so browsers fetch new versions instead of using a cached old one.
 STATIC_VERSION = hashlib.sha256(b"".join(p.read_bytes() for p in sorted((HERE / "static").iterdir()) if p.is_file())).hexdigest()[:12]
 templates.env.globals.update(
-    percent=percent, plural=plural, nav=NAV, more_nav=MORE_NAV, static_version=STATIC_VERSION,
+    percent=percent, plural=plural, nav=NAV, side_nav=SIDE_NAV, more_nav=MORE_NAV, phone_more=[REPORTS_NAV] + MORE_NAV,
+    static_version=STATIC_VERSION,
     transaction_look=looks.transaction_look, colors=looks.COLORS,
 )
 
@@ -399,6 +403,190 @@ def filter_chips(conn, filters: dict, categories: list[dict], link) -> list[dict
     return chips
 
 
+# A report's filters, in the order its address holds them (report_filters); those in REPORT_MANY can hold several. Each
+# "not_…" leaves something out of the report alone (reports.leave_out_sql), and "everyday" what isn't everyday spending.
+REPORT_FILTERS = ("period", "month", "from", "to", "by", "show", "group", "not_category", "not_account", "not_tag",
+                  "not_merchant", "not_id", "over", "everyday", "saved")
+REPORT_MANY = ("not_category", "not_account", "not_tag", "not_merchant", "not_id")
+REPORT_DEFAULTS = {"period": "last-12-months", "by": "month", "show": "spending", "group": "category"}
+REPORT_BY = {"month": "By month", "quarter": "By quarter", "year": "By year"}
+REPORT_SHOWS = {"spending": "Spending", "income": "Income"}
+REPORT_GROUPS = {"category": "By category", "merchant": "By merchant", "account": "By account", "tag": "By tag"}
+# The hues a report gives merchants and accounts, which have no color of their own: the data-viz palette's, in its order,
+# but red, kept for "over budget". "Other" is gray.
+SERIES_HUES = ("blue", "orange", "aqua", "yellow", "magenta", "green", "violet")
+
+
+def report_filters(query: list[tuple[str, str]]) -> dict:
+    """Returns a report's filters from its address's `query` (name, value pairs), each checked, with REPORT_DEFAULTS for
+    what isn't set: a period (PERIODS, "custom" with from and to, or "" for one month), how to add it up ("by"), what to
+    show and group by, the leave-outs (lists, and "over", an amount), "everyday" and "saved" (a saved report's id)."""
+    last = lambda name: next((v.strip() for k, v in reversed(query) if k == name and v.strip()), "")
+    every = lambda name, ok: list(dict.fromkeys(v.strip() for k, v in query if k == name and ok(v.strip())))
+    period = last("period")
+    month = reports.valid_month(period) or reports.valid_month(last("month")) or ""
+    period = "" if month else period if period in PERIODS or period == "custom" else REPORT_DEFAULTS["period"]
+    try:
+        over = optional_money(last("over"))
+    except ValueError:
+        over = None
+    pick = lambda name, choices: last(name) if last(name) in choices else REPORT_DEFAULTS[name]
+    return {
+        "period": period, "month": month,
+        "from": iso_day(last("from")) if period == "custom" else "", "to": iso_day(last("to")) if period == "custom" else "",
+        "by": pick("by", REPORT_BY), "show": pick("show", REPORT_SHOWS), "group": pick("group", REPORT_GROUPS),
+        "not_category": every("not_category", lambda v: v.isdigit() or v == "none"), "not_account": every("not_account", str.isdigit),
+        "not_tag": every("not_tag", str.isdigit), "not_merchant": every("not_merchant", bool), "not_id": every("not_id", str.isdigit),
+        "over": f"{over:.2f}".removesuffix(".00") if over and over > 0 else "",
+        "everyday": "1" if last("everyday") == "1" else "", "saved": last("saved") if last("saved").isdigit() else "",
+    }
+
+
+def report_pairs(filters: dict, saved: bool = True) -> list[tuple[str, str]]:
+    """Returns a report's filters that differ from REPORT_DEFAULTS as the (name, value) pairs of its address, in
+    REPORT_FILTERS order; without `saved`, leaving out which saved report it is."""
+    return [(k, v) for k in REPORT_FILTERS if saved or k != "saved"
+            for v in (filters[k] if k in REPORT_MANY else [filters[k]]) if v and v != REPORT_DEFAULTS.get(k)]
+
+
+def report_leave_outs(conn, filters: dict) -> dict:
+    """Returns what a report leaves out (reports.leave_out_sql), from its `filters`: its own leave-outs, and with
+    "everyday", what's set aside from everyday spending too."""
+    own = {"category": filters["not_category"], "account": [int(a) for a in filters["not_account"]],
+           "tag": [int(g) for g in filters["not_tag"]], "merchant": filters["not_merchant"], "id": [int(i) for i in filters["not_id"]],
+           "over": float(filters["over"]) if filters["over"] else None}
+    return reports.merge_leave_outs(own, reports.everyday(conn) if filters["everyday"] else {})
+
+
+def month_list(first: str, last: str) -> list[str]:
+    """Returns the months from `first` to `last` (YYYY-MM), both included."""
+    months = [first]
+    while months[-1] < last:
+        months.append(reports.shift_month(months[-1], 1))
+    return months
+
+
+def span_dates(start: str, end: str) -> str:
+    """Returns the days from `start` to the day before `end` in words: "Nov 2025 – Oct 2026" for whole months, "October
+    2026" for one, else like "Mar 15 – Jun 14, 2026"."""
+    last = date.fromisoformat(end) - timedelta(days=1)
+    first = date.fromisoformat(start)
+    if start.endswith("-01") and end.endswith("-01"):
+        if start[:7] == last.isoformat()[:7]:
+            return month_label(start[:7])
+        return f"{first:%b %Y} – {last:%b %Y}"
+    if first.year == last.year:
+        return f"{short_date(first)} – {short_date(last)}, {last.year}"
+    return f"{short_date(first)}, {first.year} – {short_date(last)}, {last.year}"
+
+
+def report_span(conn, filters: dict, today: date) -> dict:
+    """Returns the days a report covers: {"start", "end" (the day after its last), "months" (each it touches, oldest
+    first), "whole" (whether it's whole months), "label" (like "Last 12 months"), "dates" (span_dates)}. The year so far
+    ends with this month, whole, as the dashboard counts it; days of its own without a start start with the history."""
+    if filters["month"]:
+        start, end = reports.month_range(filters["month"])
+        label = month_label(filters["month"])
+    elif filters["period"] == "custom":
+        first = conn.execute("SELECT min(date) FROM transactions").fetchone()[0] or today.isoformat()
+        days = sorted([filters["from"] or first, filters["to"] or today.isoformat()])
+        start, end, label = days[0], (date.fromisoformat(days[1]) + timedelta(days=1)).isoformat(), "Dates of your own"
+    else:
+        start, end = period_range(filters["period"], today)
+        if filters["period"] == "this-year":
+            end = reports.month_range(reports.current_month(today))[1]
+        label = PERIODS[filters["period"]]
+    last = (date.fromisoformat(end) - timedelta(days=1)).isoformat()
+    return {"start": start, "end": end, "months": month_list(start[:7], last[:7]), "label": label,
+            "whole": start.endswith("-01") and end.endswith("-01"), "dates": span_dates(start, end)}
+
+
+def shift_days(day: str, months: int = 0, days: int = 0) -> str:
+    """Returns the ISO day `months` months and `days` days after `day` (the month's last day when it's shorter)."""
+    moved = recurring.add_months(date.fromisoformat(day), months) if months else date.fromisoformat(day)
+    return (moved + timedelta(days=days)).isoformat()
+
+
+def earlier_spans(span: dict, filters: dict) -> list[dict]:
+    """Returns the spans a report compares itself with, as {"start", "end", "label"}: the one just before it, as long,
+    and the same days a year earlier; only the latter for the year so far, and only one when they're the same."""
+    count = len(span["months"])
+    if span["whole"]:
+        before = {"start": shift_days(span["start"], -count), "end": span["start"],
+                  "label": "the month before" if count == 1 else f"the {count} months before"}
+    else:
+        length = (date.fromisoformat(span["end"]) - date.fromisoformat(span["start"])).days
+        before = {"start": shift_days(span["start"], days=-length), "end": span["start"], "label": f"the {length} days before"}
+    year = {"start": shift_days(span["start"], -12), "end": shift_days(span["end"], -12), "label": "a year earlier"}
+    if span["whole"] and count == 1:
+        year["label"] = month_label(year["start"][:7])
+    if filters["period"] == "this-year":
+        return [{**year, "label": f"the same months of {year['start'][:4]}"}]
+    return [before] if (before["start"], before["end"]) == (year["start"], year["end"]) else [before, year]
+
+
+def change(now: float, then: float) -> dict | None:
+    """Returns how `now` compares with `then`: {"diff", "percent" (None when `then` was 0)}; None when both are 0."""
+    if not now and not then:
+        return None
+    diff = round(now - then, 2)
+    return {"diff": diff, "percent": round(diff / then * 100) if then > 0 else None}
+
+
+def report_chips(conn, filters: dict, link) -> list[dict]:
+    """Returns what a report leaves out as chips: {"label", "remove"} for each, where `remove` is the report's address
+    without it (`link`, its address with some filters changed)."""
+    names = {"none": "Uncategorized", **{str(r["id"]): r["name"] for r in conn.execute("SELECT id, name FROM categories")}}
+    accounts, tag_names = account_labels(conn), {str(g["id"]): g["name"] for g in tags.tag_looks(conn).values()}
+    picked = {str(r["id"]): f"{r['name']}, {short_date(r['date'])}" for r in conn.execute(
+        f"SELECT id, name, date FROM transactions WHERE id IN ({','.join('?' * len(filters['not_id']))})", filters["not_id"])}
+    chips = []
+    for key, label in (("not_category", lambda v: names.get(v, "a category")), ("not_account", lambda v: accounts.get(int(v), "an account")),
+                       ("not_tag", lambda v: f"tagged {tag_names.get(v, 'with a tag')}"), ("not_merchant", str),
+                       ("not_id", lambda v: picked.get(v, "a transaction"))):
+        for value in filters[key]:
+            chips.append({"label": f"Not {label(value)}", "remove": link(**{key: [v for v in filters[key] if v != value]})})
+    if filters["over"]:
+        chips.append({"label": f"Nothing over ${filters['over']}", "remove": link(over="")})
+    if filters["everyday"]:
+        chips.append({"label": "Everyday spending only", "remove": link(everyday="")})
+    return chips
+
+
+def filter_choices(conn, counted: bool = False) -> dict:
+    """Returns what the filter menus offer to pick, each as (value, label, color): "accounts" (only those that count,
+    when `counted`), "categories" (with their emoji, "Group › Name" for a subcategory) and "tags"."""
+    labels = account_labels(conn)
+    rows = conn.execute(f"SELECT id FROM accounts {'WHERE hidden = 0' if counted else ''} ORDER BY hidden, archived, name COLLATE NOCASE")
+    return {"accounts": [(str(r["id"]), labels[r["id"]], None) for r in rows],
+            "categories": [(str(o["id"]), f"{o['emoji']} {o['label']}", None) for o in category_options(conn)],
+            "tags": [(str(g["id"]), g["name"], g["color"]) for g in tags.tag_looks(conn).values()]}
+
+
+# A category's or a tag's own color as a chart draws it: one of the data-viz palette's (charts.HUES), else the nearest.
+CHART_HUE = {"lime": "green", "teal": "aqua", "sky": "blue", "purple": "violet", "brown": "orange"}
+
+
+def chart_colors(wanted: list[str | None], other: bool) -> list[str]:
+    """Returns a color of charts.HUES for each of a chart's series, in order, from the color each `wanted` (None for
+    none of its own), each color once:
+    - a series' own color, when it's one of the palette's and free
+    - else the nearest of them (CHART_HUE), when that's free
+    - else the next free one; gray is taken when the chart has "Other" (`other`), and red never given"""
+    taken = {"gray"} if other else set()
+    out: list[str | None] = [None] * len(wanted)
+    for i, color in enumerate(wanted):  # a series' own color first, when it's one of the palette's
+        if color in charts.HUES["light"] and color not in taken:
+            out[i] = color
+            taken.add(color)
+    for i, color in enumerate(wanted):  # then the nearest of them, else the next free one
+        if out[i] is None:
+            near = CHART_HUE.get(color or "")
+            out[i] = near if near and near not in taken else next((c for c in SERIES_HUES if c not in taken), "gray")
+            taken.add(out[i])
+    return out
+
+
 def csv_text(value: str | None) -> str:
     """Returns `value` for a cell of the CSV export, "" for none. Text that a spreadsheet would run as a formula
     (it starts with =, +, -, @, a tab or a return) gets a ' in front, so it shows as text."""
@@ -515,12 +703,17 @@ def register_routes(app: FastAPI) -> None:
         pace = reports.spending_pace(conn, month, today)
         review, to_review = find_transactions(conn, review=True, limit=5)
         history = reports.net_worth_history(conn)
+        aside = reports.everyday(conn)
+        has_everyday = any(aside[k] for k in reports.LEAVE_OUTS) or aside["over"] is not None
+        everyday_shown = has_everyday and get_meta(conn, "everyday_shown") == "1"
         return render(
             request, conn, "dashboard.html",
             month=month, prev_month=reports.shift_month(month, -1), next_month=reports.shift_month(month, 1),
             this_month=reports.current_month(today), totals=reports.month_totals(conn, month),
             nodes=nodes, budget=budget, pace=pace, pace_chart=pace_chart(pace, month, budget),
-            months=months_chart(reports.monthly_series(conn, 12, month), month),
+            months=months_chart(reports.monthly_series(conn, 12, month), month,
+                                reports.monthly_series(conn, 12, month, aside) if everyday_shown else None),
+            everyday_shown=everyday_shown, has_everyday=has_everyday, pinned=pinned_reports(conn, today),
             worth=reports.net_worth(conn), worth_chart=worth_chart(history[-90:]),
             upcoming=recurring.upcoming(conn, 30, today)[:5], review=review, to_review=to_review,
             categories=category_options(conn),
@@ -590,7 +783,7 @@ def register_routes(app: FastAPI) -> None:
             periods=PERIODS, amount_choices=AMOUNT_CHOICES, categories=categories, hidden_transfers=hidden,
             show_transfers_link=link(transfers="1"), hide_transfers_link=link(transfers=""),
             review_link=link(review="1"), all_link=link(review=""),
-            accounts=conn.execute("SELECT id, name, mask FROM accounts ORDER BY hidden, archived, name COLLATE NOCASE").fetchall(),
+            choices=filter_choices(conn),
             month_options=[r[0] for r in conn.execute("SELECT DISTINCT substr(date, 1, 7) FROM transactions ORDER BY 1 DESC")],
         )
 
@@ -853,6 +1046,7 @@ def register_routes(app: FastAPI) -> None:
             bank=bank_details(t),
             recurring_list=conn.execute("SELECT id, name FROM recurring ORDER BY name").fetchall(),
             own_names=dict(conn.execute("SELECT id, name FROM categories").fetchall()),
+            set_aside=tid in reports.everyday(conn)["id"],
         )
 
     @app.post("/transactions/{tid}/split")
@@ -1094,6 +1288,155 @@ def register_routes(app: FastAPI) -> None:
             rule_id = categorize.add_rule(conn, t["name"], "equals", t["category_id"], t["type"])
             changed = categorize.apply_rule(conn, rule_id)
         return redirect(safe_back(back, "/transactions"), f"Rule saved: “{t['name']}” → {category_name(conn, t['category_id'])}. Updated {changed} other transactions.")
+
+    # ---- reports ----
+
+    @app.get("/reports")
+    def reports_page(request: Request, conn=Depends(get_db)):
+        """A report: what was spent or earned over a span, by month, quarter or year and by category, merchant, account or
+        tag, with what it leaves out for itself alone (report_filters). An address that holds its filters otherwise (as
+        the filter menu sends them, say) leads to the one that holds them so."""
+        query = request.query_params.multi_items()
+        filters = report_filters(query)
+        pairs = report_pairs(filters)
+        if sorted(query) != sorted(pairs):
+            return RedirectResponse("/reports" + (f"?{urlencode(pairs)}" if pairs else ""), status_code=303)
+        view = report_view(conn, filters, date.today())
+        saved = conn.execute("SELECT * FROM saved_reports ORDER BY name COLLATE NOCASE, id").fetchall()
+        current = next((r for r in saved if str(r["id"]) == filters["saved"]), None)
+        own = urlencode(report_pairs(filters, saved=False))
+        aside = reports.everyday(conn)
+        return render(
+            request, conn, "reports.html", filters=filters, **view, saved_reports=saved, current=current,
+            changed=current is not None and current["query"] != own, own_query=own,
+            chips=report_chips(conn, filters, view["report_link"]), choices=filter_choices(conn, counted=True),
+            menu_count=sum(len(filters[k]) for k in REPORT_MANY) + bool(filters["over"]) + bool(filters["everyday"]),
+            has_everyday=any(aside[k] for k in reports.LEAVE_OUTS) or aside["over"] is not None,
+            periods=PERIODS, report_by=REPORT_BY, report_shows=REPORT_SHOWS, report_groups=REPORT_GROUPS,
+            month_options=[r[0] for r in conn.execute("SELECT DISTINCT substr(date, 1, 7) FROM transactions ORDER BY 1 DESC")],
+            merchant_names=merchant_names(conn),
+        )
+
+    @app.get("/reports/transactions")
+    def report_transactions(request: Request, column: str = "", key: str = "", conn=Depends(get_db)):
+        """The transactions a part of a report's chart adds up: one of its columns (`column`, reports.column_of) and one
+        of its series (`key`, reports.keys_of; "other" for those folded together), or all of either. In the pane beside
+        the report (app.js), or on a page of their own."""
+        filters = report_filters([(k, v) for k, v in request.query_params.multi_items() if k not in ("column", "key")])
+        span = report_span(conn, filters, date.today())
+        leave = report_leave_outs(conn, filters)
+        by, group, show = filters["by"], filters["group"], filters["show"]
+        groups = reports.category_groups(conn)
+        columns = list(dict.fromkeys(reports.column_of(m, by) for m in span["months"]))
+        column = column if column in columns else ""
+        start, end = span["start"], span["end"]
+        if column:
+            first, after = reports.column_range(column)
+            start, end = max(start, first), min(end, after)
+        every = reports.counted(conn, span["start"], span["end"], show, leave)
+        rows = [r for r in every if start <= r["day"] < end]
+        label = ""
+        if key:
+            data = reports.grouped(every, columns, by, group, groups)
+            folded = set(data["folded"])
+            rows = [r for r in rows if any(k in folded if key == "other" else k == key for k in reports.keys_of(r, group, groups))]
+            shown = [{"key": key}]
+            series_looks(conn, group, shown, every)
+            label = shown[0]["label"]
+        when = column_labels(column, False)["label"] if column else span["dates"]
+        back = "/reports" + (f"?{urlencode(report_pairs(filters))}" if report_pairs(filters) else "")
+        rows.sort(key=lambda r: (r["day"], r["id"]), reverse=True)
+        return render(request, conn, "report_transactions.html", rows=rows, label=label, when=when, back=back, show=show,
+                      total=round(sum(r["value"] for r in rows), 2), several_tags=group == "tag" and key == "other")
+
+    @app.post("/reports/saved")
+    def save_report(name: str = Form(""), query: str = Form(""), conn=Depends(get_db)):
+        """Saves the report whose address holds `query` as `name`, and shows it."""
+        pairs = report_pairs(report_filters(parse_qsl(query)), saved=False)
+        name = name.strip()[:80] or "My report"
+        with conn:
+            rid = conn.execute("INSERT INTO saved_reports (name, query) VALUES (?, ?)", (name, urlencode(pairs))).lastrowid
+        return redirect(f"/reports?{urlencode(pairs + [('saved', rid)])}", f"Saved “{name}”. It's listed above the report.")
+
+    @app.post("/reports/saved/{rid}")
+    def change_report(rid: int, name: str = Form(""), query: str | None = Form(None), pinned: str | None = Form(None),
+                      back: str = Form("/reports"), conn=Depends(get_db)):
+        """Renames saved report `rid` (`name`), saves `query` as its filters, or pins it to the dashboard or takes it off
+        (`pinned`, "1" or "0")."""
+        report = conn.execute("SELECT * FROM saved_reports WHERE id = ?", (rid,)).fetchone()
+        if report is None:
+            raise HTTPException(404, "Report not found.")
+        new_name = name.strip()[:80] or report["name"]
+        new_query = urlencode(report_pairs(report_filters(parse_qsl(query)), saved=False)) if query is not None else report["query"]
+        pin = int(pinned == "1") if pinned is not None else report["pinned"]
+        with conn:
+            conn.execute("UPDATE saved_reports SET name = ?, query = ?, pinned = ? WHERE id = ?", (new_name, new_query, pin, rid))
+        if pinned is not None:
+            message = f"“{new_name}” is on the dashboard." if pin else f"Took “{new_name}” off the dashboard."
+        else:
+            message = f"Saved “{new_name}”."
+        return redirect(safe_back(back, "/reports") if query is None else f"/reports?{new_query}{'&' if new_query else ''}saved={rid}", message)
+
+    @app.post("/reports/saved/{rid}/delete")
+    def delete_report(rid: int, conn=Depends(get_db)):
+        report = conn.execute("SELECT * FROM saved_reports WHERE id = ?", (rid,)).fetchone()
+        if report is None:
+            return redirect("/reports")
+        with conn:
+            conn.execute("DELETE FROM saved_reports WHERE id = ?", (rid,))
+        return redirect("/reports" + (f"?{report['query']}" if report["query"] else ""), f"Deleted “{report['name']}”. Its report is still shown here.")
+
+    # ---- everyday spending ----
+
+    @app.get("/everyday")
+    def everyday_page(request: Request, back: str = "/", conn=Depends(get_db)):
+        """What's set aside from everyday spending (reports.everyday): categories, tags, merchants, single transactions
+        and anything over an amount. In the pane (app.js), or on a page of its own."""
+        aside = reports.everyday(conn)
+        picked = conn.execute(f"""SELECT t.*, a.name AS account_name FROM transactions t JOIN accounts a ON a.id = t.account_id
+                                  WHERE t.id IN ({','.join('?' * len(aside['id']))}) ORDER BY t.date DESC""", aside["id"]).fetchall()
+        month = reports.current_month(date.today())
+        first = reports.shift_month(month, -11)
+        start, end = reports.month_range(first)[0], reports.month_range(month)[1]
+        spent, everyday_spent = reports.totals(conn, start, end)["spent"], reports.totals(conn, start, end, aside)["spent"]
+        return render(request, conn, "everyday.html", aside=aside, picked=picked, choices=filter_choices(conn, counted=True),
+                      back=safe_back(back, "/"), merchant_names=merchant_names(conn), set_aside=round(spent - everyday_spent, 2),
+                      shown=get_meta(conn, "everyday_shown") == "1", today_year=str(date.today().year))
+
+    @app.post("/everyday")
+    def save_everyday(category: list[str] = Form([]), tag: list[str] = Form([]), merchant: list[str] = Form([]),
+                      over: str = Form(""), ids: list[str] = Form([]), back: str = Form("/"), quiet: str = Form(""),
+                      conn=Depends(get_db)):
+        """Sets aside from everyday spending the categories, tags, merchants and transactions (`ids`) ticked, and anything
+        over `over`; then shows what's set aside again."""
+        try:
+            amount = optional_money(over)
+        except ValueError:
+            return redirect(f"/everyday?{urlencode({'back': safe_back(back, '/')})}", f"“{over.strip()}” isn't an amount.")
+        leave = {"category": [c for c in dict.fromkeys(category) if c.isdigit() or c == "none"],
+                 "tag": [int(g) for g in dict.fromkeys(tag) if g.isdigit()], "merchant": list(dict.fromkeys(m.strip() for m in merchant if m.strip())),
+                 "id": [int(i) for i in dict.fromkeys(ids) if i.isdigit()], "over": abs(amount) if amount else None}
+        with conn:
+            reports.set_everyday(conn, leave)
+        return redirect(f"/everyday?{urlencode({'back': safe_back(back, '/')})}", None if quiet else "Saved what's set aside from everyday spending.")
+
+    @app.post("/everyday/transactions/{tid}")
+    def set_aside(tid: int, aside: str = Form("1"), back: str = Form("/transactions"), conn=Depends(get_db)):
+        """Sets transaction `tid` aside from everyday spending (`aside` "1"), or counts it as everyday spending again."""
+        t = get_transaction(conn, tid)
+        leave = reports.everyday(conn)
+        with conn:
+            reports.set_everyday(conn, {**leave, "id": [i for i in leave["id"] if i != tid] + ([tid] if aside == "1" else [])})
+        if aside == "1":
+            return redirect(safe_back(back, "/transactions"), f"Set aside “{t['name']}”: it still counts, but not as everyday spending.")
+        return redirect(safe_back(back, "/transactions"), f"“{t['name']}” counts as everyday spending again.")
+
+    @app.post("/everyday/shown")
+    def show_everyday(shown: str = Form(""), back: str = Form("/"), conn=Depends(get_db)):
+        """Shows the dashboard's spending by month split into everyday spending and what's set aside, or not (`shown`)."""
+        with conn:
+            set_meta(conn, "everyday_shown", "1" if shown == "1" else "")
+        return redirect(safe_back(back, "/"))
 
     # ---- budgets ----
 
@@ -1603,6 +1946,13 @@ def account_labels(conn) -> dict[int, str]:
     return {r["id"]: f"{r['name']} ••{r['mask']}" if names[r["name"]] > 1 and r["mask"] else r["name"] for r in rows}
 
 
+def merchant_names(conn, limit: int = 400) -> list[str]:
+    """Returns the names spending goes by, the most used first, one spelling each, for a field that suggests them."""
+    return [r[0] for r in conn.execute(
+        "SELECT max(name) FROM transactions WHERE type = 'regular' AND amount < 0 GROUP BY lower(trim(name)) ORDER BY count(*) DESC LIMIT ?",
+        (limit,))]
+
+
 def sidebar_groups(conn, folded: set[str]) -> list[dict]:
     """Returns the sidebar's accounts by group: each group's "kind", "label", "balance", whether it's "folded" (its kind
     is in `folded`), and its "accounts" in use (not hidden or archived), with their balances shown the way the Accounts
@@ -1944,6 +2294,160 @@ def offsetting_together(rows: list) -> list:
 
 # ---- charts -------------------------------------------------------------------
 
+def column_labels(column: str, first: bool) -> dict:
+    """Returns how a report's column (reports.column_of) is named: "tick" under its bar, "year" under that on the first
+    one and at each new year, and "label" in full, like "March 2026", "Q1 2026" or "2026"."""
+    if "-Q" in column:
+        return {"tick": column[5:], "year": column[:4] if first or column.endswith("Q1") else "", "label": f"{column[5:]} {column[:4]}"}
+    if len(column) == 4:
+        return {"tick": column, "year": "", "label": column}
+    return {"tick": datetime.strptime(column, "%Y-%m").strftime("%b"), "year": column[:4] if first or column.endswith("-01") else "",
+            "label": month_label(column)}
+
+
+def series_looks(conn, group: str, series: list[dict], rows: list[dict]) -> None:
+    """Gives each of a report's `series` (reports.grouped) its "label", its "emoji" (a category's) and its "color": a
+    category's or a tag's own, an account's by its place among the accounts, a merchant's from its name, so a series
+    keeps its color as the report changes; gray for "Other". No two series share a color (chart_colors)."""
+    wanted, order = [], lambda s: (0, int(s["key"]), "") if s["key"].isdigit() else (1, 0, s["key"])
+    if group == "category":
+        names = dict(conn.execute("SELECT id, name FROM categories").fetchall())
+        category_looks = looks.category_looks(conn)
+        for s in series:
+            look = category_looks.get(int(s["key"]), looks.UNCATEGORIZED) if s["key"].isdigit() else looks.UNCATEGORIZED
+            s.update(label=names.get(int(s["key"]), "A category") if s["key"].isdigit() else "Uncategorized", emoji=look["emoji"])
+            wanted.append(look["color"])
+    elif group == "merchant":
+        spellings: dict[str, Counter] = {}
+        for r in rows:
+            spellings.setdefault(reports.merchant_key(r["merchant"]), Counter())[" ".join((r["merchant"] or "").split())] += 1
+        for s in series:
+            s["label"] = spellings[s["key"]].most_common(1)[0][0] if s["key"] in spellings else s["key"]
+            wanted.append(SERIES_HUES[zlib.crc32(s["key"].encode()) % len(SERIES_HUES)])
+    elif group == "account":
+        labels = account_labels(conn)
+        place = {aid: i for i, aid in enumerate(sorted(labels))}
+        for s in series:
+            s["label"] = labels.get(int(s["key"]), "An account") if s["key"].isdigit() else s["key"]
+            wanted.append(SERIES_HUES[place[int(s["key"])] % len(SERIES_HUES)] if s["key"].isdigit() and int(s["key"]) in place else None)
+    else:
+        tag_looks = tags.tag_looks(conn)
+        for s in series:
+            tag = tag_looks.get(int(s["key"])) if s["key"].isdigit() else None
+            s["label"] = tag["name"] if tag else "No tag"
+            wanted.append(tag["color"] if tag else "gray")
+    other = bool(series) and series[-1]["key"] == "other"
+    named = [(s, color) for s, color in zip(series, wanted) if s["key"] != "other"]
+    # NOTE: colors go out in the series' own order (their ids or names), not by size, so one doesn't change with its rank
+    named.sort(key=lambda pair: order(pair[0]))
+    for (s, _), color in zip(named, chart_colors([color for _, color in named], other)):
+        s["color"] = color
+    for s in series:
+        s.setdefault("emoji", "")
+        if s["key"] == "other":
+            s.update(label="Other", color="gray")
+
+
+def report_view(conn, filters: dict, today: date) -> dict:
+    """Returns what the report page shows for `filters` (report_filters):
+    - the span it covers, and those it's compared with
+    - the totals: spent, income, net, the share of income kept, and spent a month on average, each with its changes
+    - the chart: the measure by column and series (reports.grouped), each series with its look and links
+    - the top merchants and the biggest transactions"""
+    span = report_span(conn, filters, today)
+    leave = report_leave_outs(conn, filters)
+    by, group, show = filters["by"], filters["group"], filters["show"]
+    groups = reports.category_groups(conn)
+    columns = list(dict.fromkeys(reports.column_of(m, by) for m in span["months"]))
+    rows = reports.counted(conn, span["start"], span["end"], show, leave)
+    data = reports.grouped(rows, columns, by, group, groups)
+    series = data["series"]
+    series_looks(conn, group, series, rows)
+    # NOTE: a span that starts before the history does has less in it, so comparing with it would mislead
+    first = conn.execute("SELECT min(date) FROM transactions").fetchone()[0] or span["start"]
+    earlier = [e for e in earlier_spans(span, filters) if e["start"] >= (first[:7] + "-01" if span["whole"] else first)]
+    pairs = report_pairs(filters)
+
+    def link(path: str = "/reports", **changes) -> str:
+        """Returns the address of this report, or of `path` with its filters, with these filters changed."""
+        changed = report_pairs({**filters, **changes}) if changes else pairs
+        return path + (f"?{urlencode(changed)}" if changed else "")
+
+    def segment(column: str = "", key: str = "") -> str:
+        """Returns the address of the transactions a part of the chart adds up (report_transactions)."""
+        return "/reports/transactions?" + urlencode(pairs + [(k, v) for k, v in (("column", column), ("key", key)) if v])
+
+    # Each series' change from the span before, and the links to its transactions and to leaving it out.
+    before: Counter = Counter()
+    for r in reports.counted(conn, earlier[0]["start"], earlier[0]["end"], show, leave) if earlier else []:
+        for key in reports.keys_of(r, group, groups):
+            before["other" if key in data["folded"] else key] += r["value"]
+    leave_name = {"category": "not_category", "merchant": "not_merchant", "account": "not_account", "tag": "not_tag"}[group]
+    for s in series:
+        s["change"] = change(s["total"], round(before.get(s["key"], 0.0), 2)) if earlier else None
+        s["link"] = segment(key=s["key"])
+        leaves = s["key"] != "other" and not (group == "tag" and s["key"] == "none")
+        s["leave_out"] = link(**{leave_name: filters[leave_name] + [s["label"] if group == "merchant" else s["key"]]}) if leaves else ""
+
+    # The chart, stacked so neighbors tell apart best, each column's whole and each part linked, and the average of the
+    # columns that are over.
+    stack = [series[i] for i in charts.best_order([s["color"] for s in series])]
+    chart = charts.stacked_bars(columns, stack)
+    column_totals = Counter()
+    for r in rows:
+        column_totals[reports.column_of(r["day"], by)] += r["value"]
+    this_month = reports.current_month(today)
+    for i, col in enumerate(chart["columns"]):
+        col.update(column_labels(col["column"], i == 0), total=round(column_totals[col["column"]], 2), link=segment(column=col["column"]))
+        for s, part in zip(stack, col["segments"]):
+            part.update(color=s["color"], label=s["label"], link=segment(col["column"], s["key"]))
+    for s in series:
+        s["cells"] = [{"value": s["values"][c], "link": segment(c, s["key"])} for c in columns]
+    done = [c for c in columns if reports.column_range(c)[1] <= reports.month_range(this_month)[0]] or columns
+    average = sum(column_totals[c] for c in done) / len(done) if len(columns) > 1 else None
+    if average is not None and average > 0:
+        chart["average"] = {"value": round(average, 2), "top": charts.y_percent(min(average, chart["high"]), 0.0, chart["high"])}
+
+    # The totals, each compared with the spans before.
+    now = reports.totals(conn, span["start"], span["end"], leave)
+    then = [{"label": e["label"], "dates": span_dates(e["start"], e["end"]), **reports.totals(conn, e["start"], e["end"], leave)}
+            for e in earlier]
+    if span["whole"]:
+        full = [m for m in span["months"] if m < this_month] or span["months"]
+        averaged = reports.totals(conn, reports.month_range(full[0])[0], reports.month_range(full[-1])[1], leave)
+        per_month = {"spent": round(averaged["spent"] / len(full), 2), "income": round(averaged["income"] / len(full), 2),
+                     "months": len(full), "left_out": len(full) < len(span["months"])}
+    else:
+        months = (date.fromisoformat(span["end"]) - date.fromisoformat(span["start"])).days / 30.4375
+        per_month = {"spent": round(now["spent"] / months, 2), "income": round(now["income"] / months, 2), "months": None, "left_out": False}
+    for t in then:
+        t["changes"] = {k: change(now[k], t[k]) for k in ("spent", "income", "net")}
+        t["rate_change"] = round(now["rate"] - t["rate"], 1) if now["rate"] is not None and t["rate"] is not None else None
+
+    # The top merchants (by what the report shows) and the biggest transactions, each to see or leave out.
+    merchants: dict[str, dict] = {}
+    for r in rows:
+        m = merchants.setdefault(reports.merchant_key(r["merchant"]), {"total": 0.0, "count": 0, "names": Counter()})
+        m["total"] += r["value"]
+        m["count"] += 1
+        m["names"][" ".join((r["merchant"] or "").split())] += 1
+    top = sorted(({"key": k, "label": m["names"].most_common(1)[0][0], "total": round(m["total"], 2), "count": m["count"]}
+                  for k, m in merchants.items() if m["total"] > 0), key=lambda m: (-m["total"], m["key"]))[:10]
+    for m in top:
+        m["link"] = "/reports/transactions?" + urlencode(report_pairs({**filters, "group": "merchant"}) + [("key", m["key"])])
+        m["leave_out"] = link(not_merchant=filters["not_merchant"] + [m["label"]])
+        m["share"] = m["total"] / top[0]["total"] * 100
+    big = reports.biggest(conn, span["start"], span["end"], show, leave)
+    for b in big:
+        b["leave_out"] = link(not_id=filters["not_id"] + [str(b["id"])])
+    return {
+        "span": span, "earlier": earlier, "now": now, "then": then, "per_month": per_month, "series": series, "stack": stack, "chart": chart,
+        "data": data, "top_merchants": top, "biggest": big, "report_link": link, "pairs": pairs,
+        "several_tags": group == "tag" and any(len(r["tags"]) > 1 for r in rows),
+    }
+
+
+
 def pace_chart(pace: dict, month: str, budget: float) -> dict | None:
     """Returns the dashboard's line chart of spending added up day by day, the month's over the month before's,
     with the budget across it; None when neither month has any spending."""
@@ -1964,14 +2468,41 @@ def pace_chart(pace: dict, month: str, budget: float) -> dict | None:
     return chart
 
 
-def months_chart(series: list[dict], selected: str) -> dict:
-    """Returns the dashboard's columns of monthly spending, from monthly_series, with `selected` marked."""
+def months_chart(series: list[dict], selected: str, everyday: list[dict] | None = None) -> dict:
+    """Returns the dashboard's columns of monthly spending, from monthly_series, with `selected` marked. With
+    `everyday` (monthly_series without what's set aside from everyday spending), each bar also has "everyday", "aside"
+    (what's set aside) and "aside_share", that part's share of the bar, drawn on top."""
     geometry = charts.bar_heights([m["spent"] for m in series])
     bars = [{**m, "height": height, "selected": m["month"] == selected,
              "tick": datetime.strptime(m["month"], "%Y-%m").strftime("%b"),
              "year": m["month"][:4] if i == 0 or m["month"].endswith("-01") else ""}
             for i, (m, height) in enumerate(zip(series, geometry["heights"]))]
-    return {"bars": bars, "ticks": geometry["ticks"]}
+    for bar, day_to_day in zip(bars, everyday or []):
+        aside = round(bar["spent"] - day_to_day["spent"], 2)
+        bar.update(everyday=day_to_day["spent"], aside=aside,
+                   aside_share=min(100.0, aside / bar["spent"] * 100) if bar["spent"] > 0 and aside > 0 else 0.0)
+    return {"bars": bars, "ticks": geometry["ticks"], "everyday": everyday is not None}
+
+
+def pinned_reports(conn, today: date) -> list[dict]:
+    """Returns the saved reports pinned to the dashboard, each with its "link", "span" (report_span), "total" (what it
+    shows came to) and "bars": a column for each of its months, quarters or years, with its height and total."""
+    out = []
+    for r in conn.execute("SELECT * FROM saved_reports WHERE pinned = 1 ORDER BY name COLLATE NOCASE, id"):
+        filters = report_filters(parse_qsl(r["query"]))
+        span = report_span(conn, filters, today)
+        rows = reports.counted(conn, span["start"], span["end"], filters["show"], report_leave_outs(conn, filters))
+        columns = list(dict.fromkeys(reports.column_of(m, filters["by"]) for m in span["months"]))
+        totals = Counter()
+        for row in rows:
+            totals[reports.column_of(row["day"], filters["by"])] += row["value"]
+        geometry = charts.bar_heights([totals[c] for c in columns])
+        out.append({"id": r["id"], "name": r["name"], "span": span, "show": filters["show"],
+                    "link": f"/reports?{r['query']}{'&' if r['query'] else ''}saved={r['id']}",
+                    "total": round(sum(row["value"] for row in rows), 2),
+                    "bars": [{"height": h, "total": round(totals[c], 2), **column_labels(c, i == 0)}
+                             for i, (c, h) in enumerate(zip(columns, geometry["heights"]))]})
+    return out
 
 
 def worth_chart(history: list[tuple[str, float]]) -> dict | None:

@@ -28,6 +28,26 @@ On **Transactions**, **Filters** opens a field for each filter:
 
 The list changes as you pick. The filters in use show as chips under the menu: press one to remove it. **Newest first** turns into **Biggest first**, one list by amount. Above the list, what it adds up to: spent, income and net, counted as the dashboard counts them.
 
+## Reports
+
+**Reports** shows where the money went over a span of time: the last 12 months to start with, or this month, last month, the last 3 months, this year, last year, one month, or dates of your own.
+
+- Totals come **by month**, **by quarter** or **by year**, for **spending** or **income**, and **by category**, **merchant**, **account** or **tag**. Up to seven of them get a color of their own; the rest add up as **Other**.
+- Above the chart: what was spent and earned, the difference, how much of your income you kept, and a month's spending on average. Each compares with the span before and with the same span a year earlier, when your history goes back that far.
+- Point at a bar for its numbers, or press **Show as a table**. Click a part of a bar to see its transactions, beside the report; click a transaction there to open it.
+- **Leave out** takes things out of the report only, without changing any transaction: categories (a group with its subcategories), accounts, tags, merchants, anything over an amount, and single transactions, with the **×** beside them in **Top merchants** and **Biggest expenses**. The chips under the menu bring each back.
+- **Save** keeps a report under a name, listed above it. **Pin to dashboard** shows it there too.
+
+Reports count the way the dashboard does: a friend's payback goes with its purchase, a split counts through its parts, and transfers, excluded transactions and hidden accounts count nowhere.
+
+## Everyday spending
+
+A big, rare cost, like a semester's tuition, makes one month's bar tower over the others. Set it aside to see what you spend from day to day: it still counts everywhere, but apart.
+
+1. Open the transaction and pick **Set aside: not everyday spending** under **⋯**. To set aside more at once, use **Set aside…** above **Spending by month** on the dashboard: categories, tags, merchants, or anything over an amount.
+2. Switch on **Everyday** above the chart: each month's bar shows what was set aside on top, hatched gray, and its readout and table give both parts.
+3. In **Reports**, tick **Leave out what isn't everyday spending** under **Leave out**.
+
 ## Reviewing new transactions
 
 New transactions wait on **Dashboard → To review** and **Transactions → To review**. Pick the right category, or press ✓ if it's already right. When you change a category, the app offers to do the same for every transaction with that name, now and later.

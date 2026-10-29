@@ -2,8 +2,10 @@
 
 Steps:
 1. Make the accounts, the categories and their budgets.
-2. Add three months of transactions up to today: bills, paychecks, everyday spending, and paired moves between accounts.
+2. Add 14 months of transactions up to today: bills, paychecks, everyday spending, paired moves between accounts, and
+   tuition twice a year.
 3. Add a split, a purchase friends paid back, tags, recurring charges, and daily balances for the net worth chart.
+4. Set the tuition aside from everyday spending, and show it apart on the dashboard.
 
 Run it with a folder that has no database yet, then point the app at that folder:
 
@@ -11,6 +13,7 @@ Run it with a folder that has no database yet, then point the app at that folder
     DATA_DIR=demo BACKUP_DIR=demo/backups IMPORT_DIR=demo/import uv run --env-file .env.example uvicorn app.main:app --port 8081
 """
 
+import json
 import random
 import sys
 from datetime import date, timedelta
@@ -33,7 +36,7 @@ CATEGORIES = {
     "Transportation": [("Car & Rideshare", 120), ("Gas", 140)],
     "Home": [("Rent", 1850), ("Utilities", 200), ("Household", 120)],
     None: [("Shopping", 250), ("Entertainment", 120), ("Subscriptions", 45), ("Travel", None), ("Health", 60),
-           ("Personal Care", 60)],
+           ("Personal Care", 60), ("Education", None)],
 }
 # day of the month, name, amount (a range for bills that vary), category, account
 MONTHLY = [
@@ -60,6 +63,8 @@ EVERYDAY = [
     (["Wellness Pharmacy"], "Health", "Everyday Checking", 30, (9, 30)),
 ]
 PAYCHECK = ("Acme Corp Payroll", 2450.00)
+# month and day, amount: a semester's tuition, the kind of big, rare cost that isn't everyday spending
+TUITION = [((1, 12), -4850.00), ((8, 28), -4850.00)]
 # name, text its transactions hold, typical amount, category
 RECURRING = [("Rent", "maple street", -1850.00, "Rent"), ("Streamflix", "streamflix", -15.49, "Subscriptions"),
              ("Tunebox Music", "tunebox", -10.99, "Subscriptions"), ("Fiberline Internet", "fiberline", -60.00, "Utilities"),
@@ -98,7 +103,7 @@ def build(folder: Path, today: date | None = None, seed: int = 2) -> Path:
             conn.execute("UPDATE transactions SET transfer_id = ? WHERE id = ?", (came_in, out))
             conn.execute("UPDATE transactions SET transfer_id = ? WHERE id = ?", (out, came_in))
 
-        start = recurring.add_months(today.replace(day=1), -2)
+        start = recurring.add_months(today.replace(day=1), -13)
         day = start
         while day <= today:
             for when, name, amount, category, account in MONTHLY:
@@ -110,6 +115,9 @@ def build(folder: Path, today: date | None = None, seed: int = 2) -> Path:
                 move(day, round(rng.uniform(900, 1400), 2), "Everyday Checking", "Rewards Card", "Rewards Card Payment", "Payment Thank You")
             if day.day == 26:
                 move(day, 500.00, "Everyday Checking", "High-Yield Savings", "Transfer to Savings", "Transfer from Checking")
+            for (month, when), amount in TUITION:
+                if (day.month, day.day) == (month, when):
+                    add(day, "State University Bursar", amount, "Education")
             for names, category, account, every, (low, high) in EVERYDAY:
                 if rng.random() < 1 / every:
                     add(day, rng.choice(names), -rng.uniform(low, high), category, account, pending=int(day == today))
@@ -136,6 +144,10 @@ def build(folder: Path, today: date | None = None, seed: int = 2) -> Path:
         tags.add(conn, work, [dinner])
         for name, pattern, amount, category in RECURRING:
             recurring.track(conn, name, pattern, "monthly", amount, categories[category])
+
+        # The tuition is set aside from everyday spending, and the dashboard shows it apart.
+        db.set_meta(conn, "everyday", json.dumps({"category": [str(categories["Education"])]}))
+        db.set_meta(conn, "everyday_shown", "1")
 
         # Balances by day, walked back from today's, for the net worth chart.
         for name, kind, _, balance, _ in ACCOUNTS:

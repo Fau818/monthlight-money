@@ -26,7 +26,8 @@ def test_the_demo_data_builds_and_every_page_shows_it(settings):
     assert reports.month_totals(conn, "2026-10")["spent"] > 0
     conn.close()
     with TestClient(create_app(settings)) as client:
-        for page in ("/", "/transactions", "/budgets", "/recurring", "/accounts", "/categories", "/export.csv"):
+        for page in ("/", "/transactions", "/reports", "/reports?group=merchant&by=quarter", "/everyday", "/budgets", "/recurring",
+                     "/accounts", "/categories", "/export.csv"):
             assert client.get(page).status_code == 200, page
 
 

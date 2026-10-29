@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% from "_macros.html" import transaction_row, split_head, review_all, left_text, icon with context %}
+{% from "_filters.html" import filter_menu, dates_field, checks %}
 {% block title %}Transactions{% endblock %}
 {% block content %}
 <div class="page-head">
@@ -15,94 +16,38 @@
     <input type="search" name="q" value="{{ filters.q }}" placeholder="Search names and notes" aria-label="Search names and notes">
   </label>
   <div class="filters">
-    <details class="filter-menu" data-filter-menu>
-      <summary class="chip{% if menu_count %} on{% endif %}">{{ icon("filter") }} Filters{% if menu_count %} <b class="count">{{ menu_count }}</b>{% endif %}</summary>
-      <div class="filter-panel">
-        <div class="filter-col">
-          <div class="filter-field">
-            <label class="filter-label" for="filter-period">Dates</label>
-            <select name="period" id="filter-period">
-              <option value="">All time</option>
-              {% for value, label in periods.items() %}<option value="{{ value }}"{% if filters.period == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
-              <option value="custom"{% if filters.period == "custom" %} selected{% endif %}>Custom dates…</option>
-              <optgroup label="Months">
-                {% for m in month_options %}<option value="{{ m }}"{% if filters.month == m %} selected{% endif %}>{{ m|month_label }}</option>{% endfor %}
-              </optgroup>
+    {% call filter_menu(menu_count) %}
+      <div class="filter-col">
+        {{ dates_field(filters, periods, month_options) }}
+        <div class="filter-field">
+          <label class="filter-label" for="filter-amount">Amount</label>
+          {% set choice, first, second = amount_choice %}
+          <div class="filter-amount">
+            <select name="amount_op" id="filter-amount" aria-label="Amount">
+              {% for value, label in amount_choices %}<option value="{{ value }}"{% if choice == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
             </select>
-            <div class="filter-dates">
-              <label>From <input type="date" name="from" value="{{ filters["from"] }}"></label>
-              <label>To <input type="date" name="to" value="{{ filters.to }}"></label>
-            </div>
+            <input name="amount_min" value="{{ first }}" inputmode="decimal" placeholder="12.50" aria-label="Amount">
+            <span class="amount-and">and</span>
+            <input name="amount_max" value="{{ second }}" inputmode="decimal" placeholder="20" aria-label="Highest amount">
           </div>
-          <div class="filter-field">
-            <label class="filter-label" for="filter-amount">Amount</label>
-            {% set choice, first, second = amount_choice %}
-            <div class="filter-amount">
-              <select name="amount_op" id="filter-amount" aria-label="Amount">
-                {% for value, label in amount_choices %}<option value="{{ value }}"{% if choice == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
-              </select>
-              <input name="amount_min" value="{{ first }}" inputmode="decimal" placeholder="12.50" aria-label="Amount">
-              <span class="amount-and">and</span>
-              <input name="amount_max" value="{{ second }}" inputmode="decimal" placeholder="20" aria-label="Highest amount">
-            </div>
-            <p class="filter-hint">Money in and out alike.</p>
-          </div>
-          <fieldset class="filter-field">
-            <legend class="filter-label">Type</legend>
-            <div class="filter-choices">
-              {% for value, label in [("regular", "Regular"), ("income", "Income"), ("transfer", "Transfer")] %}
-                <label class="check"><input type="checkbox" name="type" value="{{ value }}"{% if value in filters.type %} checked{% endif %}> {{ label }}</label>
-              {% endfor %}
-            </div>
-          </fieldset>
-          <fieldset class="filter-field">
-            <legend class="filter-label">Review</legend>
-            <div class="filter-choices">
-              {% for value, label in [("", "Any"), ("1", "To review"), ("done", "Reviewed")] %}
-                <label class="check"><input type="radio" name="review" value="{{ value }}"{% if filters.review == value %} checked{% endif %}> {{ label }}</label>
-              {% endfor %}
-            </div>
-          </fieldset>
-          <div class="filter-field">
-            <label class="check"><input type="checkbox" name="transfers" value="1"{% if filters.transfers %} checked{% endif %}> Show moves between your accounts</label>
-          </div>
+          <p class="filter-hint">Money in and out alike.</p>
         </div>
-        <div class="filter-col">
-          <fieldset class="filter-field">
-            <legend class="filter-label">Accounts</legend>
-            <div class="filter-choices filter-list">
-              {% for a in accounts %}
-                <label class="check"><input type="checkbox" name="account" value="{{ a.id }}"{% if a.id|string in filters.account %} checked{% endif %}> {{ account_labels.get(a.id, a.name) }}</label>
-              {% endfor %}
-            </div>
-          </fieldset>
-          <fieldset class="filter-field">
-            <legend class="filter-label">Categories</legend>
-            <div class="filter-choices filter-list">
-              <label class="check"><input type="checkbox" name="category" value="none"{% if "none" in filters.category %} checked{% endif %}> Uncategorized</label>
-              <label class="check"><input type="checkbox" name="category" value="excluded"{% if "excluded" in filters.category %} checked{% endif %}> 🚫 Excluded</label>
-              {% for o in categories %}
-                <label class="check"><input type="checkbox" name="category" value="{{ o.id }}"{% if o.id|string in filters.category %} checked{% endif %}> {{ o.emoji }} {{ o.label }}</label>
-              {% endfor %}
-            </div>
-          </fieldset>
-          {% if tag_looks %}
-            <fieldset class="filter-field">
-              <legend class="filter-label">Tags</legend>
-              <div class="filter-choices filter-list">
-                {% for g in tag_looks.values() %}
-                  <label class="check"><input type="checkbox" name="tag" value="{{ g.id }}"{% if g.id|string in filters.tag %} checked{% endif %}> <span class="tag tint-{{ g.color }}">{{ g.name }}</span></label>
-                {% endfor %}
-              </div>
-            </fieldset>
-          {% endif %}
-        </div>
-        <div class="filter-actions">
-          <button type="submit" class="primary">Show {{ plural(total, "transaction") }}</button>
-          {% if menu_count %}<a href="{{ clear_link }}">Clear the filters</a>{% endif %}
+        {{ checks("type", "Type", [("regular", "Regular", none), ("income", "Income", none), ("transfer", "Transfer", none)], filters.type) }}
+        {{ checks("review", "Review", [("", "Any", none), ("1", "To review", none), ("done", "Reviewed", none)], [filters.review], radio=true) }}
+        <div class="filter-field">
+          <label class="check"><input type="checkbox" name="transfers" value="1"{% if filters.transfers %} checked{% endif %}> Show moves between your accounts</label>
         </div>
       </div>
-    </details>
+      <div class="filter-col">
+        {{ checks("account", "Accounts", choices.accounts, filters.account, long=true) }}
+        {{ checks("category", "Categories", [("none", "Uncategorized", none), ("excluded", "🚫 Excluded", none)] + choices.categories, filters.category, long=true) }}
+        {% if choices.tags %}{{ checks("tag", "Tags", choices.tags, filters.tag, long=true) }}{% endif %}
+      </div>
+      <div class="filter-actions">
+        <button type="submit" class="primary">Show {{ plural(total, "transaction") }}</button>
+        {% if menu_count %}<a href="{{ clear_link }}">Clear the filters</a>{% endif %}
+      </div>
+    {% endcall %}
     <label class="sort">{{ icon("sort") }}<span class="sr-only">Sort</span>
       <select name="sort" aria-label="Sort" class="chip-select">
         <option value="">Newest first</option>

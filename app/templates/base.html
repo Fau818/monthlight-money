@@ -36,7 +36,7 @@
       {% if filter_pairs is defined %}{% for key, value in filter_pairs if key != "q" %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}{% endif %}
     </form>
     <nav aria-label="Main">
-      {% for href, label, name in nav %}{{ nav_link(href, label, name) }}{% endfor %}
+      {% for href, label, name in side_nav %}{{ nav_link(href, label, name) }}{% endfor %}
     </nav>
     {% if side_groups %}
       {# Accounts in use, by group, as the Accounts page shows their balances; each opens its transactions. #}
@@ -81,7 +81,7 @@
     {% endif %}
     <details class="more-menu">
       <summary class="icon-btn" aria-label="More pages">{{ icon("more") }}</summary>
-      <div class="menu">{% for href, label, name in more_nav %}{{ nav_link(href, label, name) }}{% endfor %}</div>
+      <div class="menu">{% for href, label, name in phone_more %}{{ nav_link(href, label, name) }}{% endfor %}</div>
     </details>
   </header>
 

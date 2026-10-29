@@ -1,3 +1,6 @@
+from itertools import pairwise
+from pathlib import Path
+
 from app import charts
 
 
@@ -42,3 +45,33 @@ def test_line_chart_geometry():
 def test_bar_heights():
     bars = charts.bar_heights([1000, 2500, 0, -20])
     assert bars["high"] == 3000 and bars["heights"] == [1000 / 3000 * 100, 2500 / 3000 * 100, 0.0, 0.0]
+
+
+def test_stacked_bars_geometry():
+    series = [{"key": "rent", "values": {"2026-09": 1000.0, "2026-10": 1000.0}},
+              {"key": "food", "values": {"2026-09": 500.0, "2026-10": -20.0}}]  # refunds outweighing spending aren't drawn
+    chart = charts.stacked_bars(["2026-09", "2026-10"], series)
+    assert chart["high"] == 1500 and [t["label"] for t in chart["ticks"]] == ["$0", "$500", "$1K", "$1.5K"]
+    first, second = chart["columns"]
+    assert (first["top"], first["height"], round(second["height"], 2)) == (1500.0, 100.0, 66.67)
+    assert [(p["key"], round(p["share"], 2)) for p in first["segments"]] == [("rent", 66.67), ("food", 33.33)]
+    assert second["top"] == 1000.0 and [p["share"] for p in second["segments"]] == [100.0, 0.0]
+    assert second["segments"][1]["value"] == -20.0  # the readout and the table still show it
+
+
+def test_the_palette_matches_the_stylesheet():
+    css = (Path(__file__).resolve().parent.parent / "app" / "static" / "style.css").read_text()
+    dark = css.index("@media (prefers-color-scheme: dark)")
+    for mode, part in (("light", css[:dark]), ("dark", css[dark:])):
+        for name, hex_value in charts.HUES[mode].items():
+            assert f"--c-{name}: {hex_value};" in part, (mode, name)
+
+
+def test_neighbors_in_a_stack_tell_apart():
+    assert charts.separation("blue", "orange") > 1  # far apart for every eye
+    assert charts.separation("green", "orange") < 1  # red-blind eyes mix them up
+    colors = ["green", "orange", "violet", "blue", "magenta", "aqua", "yellow", "gray"]
+    order = charts.best_order(colors)
+    assert order[-1] == 7 and sorted(order) == list(range(8))  # "Other" stays on top
+    assert min(charts.separation(colors[a], colors[b]) for a, b in pairwise(order)) >= 1
+    assert charts.best_order(["blue", "orange"]) == [0, 1]  # already fine: kept as it was

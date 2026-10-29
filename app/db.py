@@ -133,6 +133,14 @@ CREATE TABLE IF NOT EXISTS tags (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_tags_name ON tags(name COLLATE NOCASE);
 
+CREATE TABLE IF NOT EXISTS saved_reports (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    query TEXT NOT NULL DEFAULT '',     -- the report's filters, as its address holds them (main.report_pairs)
+    pinned INTEGER NOT NULL DEFAULT 0,  -- shown on the dashboard
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS transaction_tags (
     transaction_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
     tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,

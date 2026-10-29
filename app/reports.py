@@ -1,8 +1,12 @@
 """Numbers for the dashboard, budgets and accounts pages."""
 
 import calendar
+import json
 import sqlite3
 from datetime import date
+
+from . import tags
+from .db import get_meta, set_meta
 
 LIABILITY_TYPES = {"credit", "loan"}
 ACCOUNT_GROUPS = [
@@ -158,19 +162,21 @@ def budget_total(nodes: list[dict]) -> float:
     return round(sum(n["total_budget"] or 0 for n in nodes), 2)
 
 
-def monthly_series(conn: sqlite3.Connection, months: int, last_month: str) -> list[dict]:
-    """Returns [{"month", "spent", "income"}] for the `months` months ending with `last_month`, oldest first."""
+def monthly_series(conn: sqlite3.Connection, months: int, last_month: str, leave: dict | None = None) -> list[dict]:
+    """Returns [{"month", "spent", "income"}] for the `months` months ending with `last_month`, oldest first, leaving
+    out `leave` (leave_out_sql)."""
     first = shift_month(last_month, -(months - 1))
     start, end = month_range(first)[0], month_range(last_month)[1]
+    clause, params = leave_out_sql(leave or {})
     rows = {
         r["month"]: r
         for r in conn.execute(
             f"""SELECT substr({DAY}, 1, 7) AS month,
                   coalesce(-sum(CASE WHEN t.type = 'regular' AND coalesce(c.excluded, 0) = 0 THEN t.amount END), 0) AS spent,
                   coalesce(sum(CASE WHEN t.type = 'income' THEN t.amount END), 0) AS income
-                {_SPENDING}
+                {_REPORTED} AND {clause}
                 GROUP BY month""",
-            {"start": start, "end": end},
+            {"start": start, "end": end, **params},
         )
     }
     out = []
@@ -254,3 +260,218 @@ def net_worth_history(conn: sqlite3.Connection) -> list[tuple[str, float]]:
         else:
             out.append((r["date"], total))
     return out
+
+
+# A report (main.reports_page) counts as the dashboard does, and can leave things out for itself alone: accounts,
+# categories (a group with its subcategories), tags, merchants, single transactions, and anything over an amount.
+# Everything about a payback follows its purchase: its day, category, account, tags, merchant and size.
+_REPORTED = f"""
+    FROM transactions t
+    JOIN accounts a ON a.id = t.account_id
+    LEFT JOIN transactions p ON p.id = t.reimburses_id
+    LEFT JOIN transactions sp ON sp.id = t.split_from_id
+    LEFT JOIN transactions psp ON psp.id = p.split_from_id
+    LEFT JOIN categories c ON c.id = {CATEGORY}
+    WHERE {DAY} >= :start AND {DAY} < :end AND t.excluded = 0 AND coalesce(p.excluded, 0) = 0 AND a.hidden = 0
+      AND {NOT_SPLIT}
+"""
+# The merchant a transaction counts with: a part of a split goes by its split's name, and a payback by its purchase's.
+MERCHANT = "CASE WHEN p.id IS NULL THEN coalesce(sp.name, t.name) ELSE coalesce(psp.name, p.name) END"
+# What a report can count: which transactions, and what each adds (spending as a positive amount, a refund negative).
+MEASURES = {"spending": ("t.type = 'regular' AND coalesce(c.excluded, 0) = 0", "-t.amount"), "income": ("t.type = 'income'", "t.amount")}
+LEAVE_OUTS = ("account", "category", "tag", "merchant", "id")  # each a list; "over" is an amount
+MAX_SERIES = 8  # a chart's series at most: past that, the smallest are folded into one, "other"
+
+
+def no_leave_outs() -> dict:
+    """Returns leave-outs (leave_out_sql) that leave nothing out."""
+    return {**{name: [] for name in LEAVE_OUTS}, "over": None}
+
+
+def merge_leave_outs(*leaves: dict) -> dict:
+    """Returns leave-outs that leave out everything any of `leaves` does."""
+    merged = no_leave_outs()
+    for leave in leaves:
+        for name in LEAVE_OUTS:
+            merged[name] = list(dict.fromkeys(merged[name] + list(leave.get(name) or [])))
+        if leave.get("over") is not None:
+            merged["over"] = leave["over"] if merged["over"] is None else min(merged["over"], leave["over"])
+    return merged
+
+
+def leave_out_sql(leave: dict) -> tuple[str, dict]:
+    """Returns the SQL condition on _REPORTED's rows that leaves out what `leave` names, and its named parameters:
+    - "account", "tag" and "id": ids; leaving out a transaction leaves out its paybacks, and a split its parts
+    - "category": ids, a group with its subcategories, and "none" for spending without a category
+    - "merchant": names, whatever their case
+    - "over": an amount, money in and out alike, past which anything is left out"""
+    where, params = [], {}
+
+    def listed(prefix: str, values: list, each: str = "{}") -> str:
+        names = [f"{prefix}{i}" for i in range(len(values))]
+        params.update(zip(names, values))
+        return ", ".join(each.format(f":{name}") for name in names)
+
+    if leave.get("account"):
+        where.append(f"coalesce(p.account_id, t.account_id) NOT IN ({listed('la', leave['account'])})")
+    ids = [int(c) for c in leave.get("category") or [] if str(c).isdigit()]
+    if ids:
+        either = listed("lc", ids)
+        where.append(f"(t.type != 'regular' OR (coalesce(c.id, 0) NOT IN ({either}) AND coalesce(c.parent_id, 0) NOT IN ({either})))")
+    if "none" in (leave.get("category") or []):
+        where.append("(t.type != 'regular' OR c.id IS NOT NULL)")
+    if leave.get("tag"):
+        where.append(f"""NOT EXISTS (SELECT 1 FROM transaction_tags lt WHERE lt.transaction_id = coalesce(p.id, t.id)
+                                    AND lt.tag_id IN ({listed('lg', leave['tag'])}))""")
+    if leave.get("merchant"):
+        where.append(f"lower({MERCHANT}) NOT IN ({listed('lm', leave['merchant'], 'lower({})')})")
+    if leave.get("id"):
+        either = listed("li", leave["id"])
+        where.append(f"t.id NOT IN ({either}) AND coalesce(p.id, 0) NOT IN ({either}) AND coalesce(t.split_from_id, 0) NOT IN ({either})")
+    if leave.get("over") is not None:
+        params["lo"] = leave["over"] + 0.005
+        where.append("abs(coalesce(p.amount, t.amount)) <= :lo")
+    return " AND ".join(where) or "1 = 1", params
+
+
+def counted(conn: sqlite3.Connection, start: str, end: str, measure: str = "spending", leave: dict | None = None) -> list[dict]:
+    """Returns the transactions `measure` (MEASURES) counts from `start` to `end` (ISO days, the end left out), leaving
+    out `leave` (leave_out_sql), in the order they count. Each has "day" (the day it counts on), "value" (what it adds),
+    "category_id", "merchant", "account_id" (its purchase's, for a payback) and "tags" (its purchase's, for a payback)."""
+    where, value = MEASURES[measure]
+    clause, params = leave_out_sql(leave or {})
+    rows = [dict(r) for r in conn.execute(
+        f"""SELECT t.id, t.name, t.date, t.account_id AS own_account_id, t.reimburses_id, t.split_from_id, t.amount,
+                   {DAY} AS day, {value} AS value, c.id AS category_id, {MERCHANT} AS merchant,
+                   coalesce(p.account_id, t.account_id) AS account_id, coalesce(p.id, t.id) AS tag_source
+            {_REPORTED} AND {where} AND {clause}
+            ORDER BY day, t.id""",
+        {"start": start, "end": end, **params},
+    )]
+    tagged = tags.tags_by_transaction(conn, list({r["tag_source"] for r in rows}))
+    for r in rows:
+        r["tags"] = tagged.get(r["tag_source"], [])
+    return rows
+
+
+def category_groups(conn: sqlite3.Connection) -> dict[int, int]:
+    """Returns the category each category adds up in, by id, as category_spending adds them up: its group, unless that's
+    excluded, else itself."""
+    rows = conn.execute("SELECT id, parent_id, excluded FROM categories").fetchall()
+    counted_ids = {r["id"] for r in rows if not r["excluded"]}
+    return {r["id"]: r["parent_id"] if r["parent_id"] in counted_ids else r["id"] for r in rows}
+
+
+def merchant_key(name: str | None) -> str:
+    """Returns the key a merchant's transactions share, whatever the case and spacing of their names."""
+    return " ".join((name or "").split()).lower()
+
+
+def keys_of(row: dict, group: str, groups: dict[int, int]) -> list[str]:
+    """Returns the keys of the series transaction `row` (from counted) adds to when grouped by `group` (one, or one for
+    each of its tags): a category's group, a merchant (merchant_key), an account or a tag by id, or "none"."""
+    if group == "category":
+        return [str(groups.get(row["category_id"], row["category_id"]))] if row["category_id"] is not None else ["none"]
+    if group == "merchant":
+        return [merchant_key(row["merchant"])]
+    if group == "account":
+        return [str(row["account_id"])]
+    return [str(tag) for tag in row["tags"]] or ["none"]
+
+
+def column_of(day: str, by: str) -> str:
+    """Returns the column a day (or a month, YYYY-MM) adds up in: its month, its quarter ("2026-Q1") or its year."""
+    if by == "quarter":
+        return f"{day[:4]}-Q{(int(day[5:7]) - 1) // 3 + 1}"
+    return day[:4] if by == "year" else day[:7]
+
+
+def column_range(column: str) -> tuple[str, str]:
+    """Returns the first day of a column (column_of) and the first day after it, as ISO dates."""
+    if "-Q" in column:
+        first = f"{column[:4]}-{(int(column[-1]) - 1) * 3 + 1:02d}"
+        return month_range(first)[0], month_range(shift_month(first, 2))[1]
+    if len(column) == 4:
+        return f"{column}-01-01", f"{int(column) + 1}-01-01"
+    return month_range(column)
+
+
+def grouped(rows: list[dict], columns: list[str], by: str, group: str, groups: dict[int, int]) -> dict:
+    """Returns rows from counted added up by column and series: {"series": [{"key", "total", "count", "values"}], "total",
+    "count", "folded"}. "values" holds each of `columns`' amount. Series come biggest first; past MAX_SERIES, the
+    smallest are folded into one with the key "other", last, and "folded" lists their keys. A transaction with several
+    tags adds to each of them, so the series can add up to more than "total"."""
+    series: dict[str, dict] = {}
+    total = 0.0
+    for r in rows:
+        column = column_of(r["day"], by)
+        total += r["value"]
+        for key in keys_of(r, group, groups):
+            s = series.setdefault(key, {"key": key, "total": 0.0, "count": 0, "values": dict.fromkeys(columns, 0.0)})
+            s["total"] += r["value"]
+            s["count"] += 1
+            if column in s["values"]:
+                s["values"][column] += r["value"]
+    ordered = sorted(series.values(), key=lambda s: (-s["total"], s["key"]))
+    folded = []
+    if len(ordered) > MAX_SERIES:
+        kept, rest = ordered[:MAX_SERIES - 1], ordered[MAX_SERIES - 1:]
+        other = {"key": "other", "total": sum(s["total"] for s in rest), "count": sum(s["count"] for s in rest),
+                 "values": {c: sum(s["values"][c] for s in rest) for c in columns}}
+        ordered, folded = kept + [other], [s["key"] for s in rest]
+    for s in ordered:
+        s["total"] = round(s["total"], 2)
+        s["values"] = {c: round(v, 2) for c, v in s["values"].items()}
+    return {"series": ordered, "total": round(total, 2), "count": len(rows), "folded": folded}
+
+
+def totals(conn: sqlite3.Connection, start: str, end: str, leave: dict | None = None) -> dict:
+    """Returns {"spent", "income", "net", "rate"} from `start` to `end` (ISO days, the end left out), leaving out
+    `leave` (leave_out_sql), counted as month_totals counts them; "rate" is the share of income kept, None without income."""
+    clause, params = leave_out_sql(leave or {})
+    row = conn.execute(
+        f"""SELECT
+              coalesce(-sum(CASE WHEN {MEASURES['spending'][0]} THEN t.amount END), 0) AS spent,
+              coalesce(sum(CASE WHEN {MEASURES['income'][0]} THEN t.amount END), 0) AS income
+            {_REPORTED} AND {clause}""",
+        {"start": start, "end": end, **params},
+    ).fetchone()
+    spent, income = round(row["spent"], 2), round(row["income"], 2)
+    net = round(income - spent, 2)
+    return {"spent": spent, "income": income, "net": net, "rate": round(net / income * 100, 1) if income > 0 else None}
+
+
+def biggest(conn: sqlite3.Connection, start: str, end: str, measure: str = "spending", leave: dict | None = None,
+            limit: int = 10) -> list[dict]:
+    """Returns the biggest transactions `measure` counts from `start` to `end`, leaving out `leave`, biggest first:
+    purchases (a split by its parts) or money in, never a payback, which counts with its purchase. Each purchase has
+    "paid_back", what its paybacks came to, if any."""
+    where, value = MEASURES[measure]
+    clause, params = leave_out_sql(leave or {})
+    return [dict(r) for r in conn.execute(
+        f"""SELECT t.id, t.name, t.date, t.amount, t.account_id, c.id AS category_id, {MERCHANT} AS merchant,
+                   (SELECT sum(b.amount) FROM transactions b WHERE b.reimburses_id = t.id AND b.excluded = 0) AS paid_back
+            {_REPORTED} AND {where} AND {clause} AND t.reimburses_id IS NULL AND {value} > 0
+            ORDER BY {value} DESC, t.date DESC, t.id LIMIT :limit""",
+        {"start": start, "end": end, "limit": limit, **params},
+    )]
+
+
+def everyday(conn: sqlite3.Connection) -> dict:
+    """Returns what the user set aside from everyday spending (main.everyday_page), as leave-outs (leave_out_sql)."""
+    try:
+        saved = json.loads(get_meta(conn, "everyday") or "{}")
+    except ValueError:
+        saved = {}
+    saved = saved if isinstance(saved, dict) else {}
+    over = saved.get("over")
+    return merge_leave_outs({name: [v for v in saved.get(name) or [] if isinstance(v, (int, str))] for name in LEAVE_OUTS}
+                            | {"over": float(over) if isinstance(over, (int, float)) and over > 0 else None})
+
+
+def set_everyday(conn: sqlite3.Connection, leave: dict) -> None:
+    """Stores `leave` as what's set aside from everyday spending."""
+    kept = {name: leave[name] for name in LEAVE_OUTS if leave.get(name)}
+    if leave.get("over") is not None:
+        kept["over"] = leave["over"]
+    set_meta(conn, "everyday", json.dumps(kept))

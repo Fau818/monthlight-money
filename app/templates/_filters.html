@@ -1,0 +1,44 @@
+{# The filter menu, as the transactions list and the reports have it: a button that says how many filters are in use,
+   opening a panel with a labeled field for each, applied as soon as one changes (app.js). Each page puts in the fields
+   it needs, as the caller. #}
+{% from "_macros.html" import icon %}
+
+{% macro filter_menu(count, label="Filters") %}
+  <details class="filter-menu" data-filter-menu>
+    <summary class="chip{% if count %} on{% endif %}">{{ icon("filter") }} {{ label }}{% if count %} <b class="count">{{ count }}</b>{% endif %}</summary>
+    <div class="filter-panel">{{ caller() }}</div>
+  </details>
+{% endmacro %}
+
+{# A span of time (PERIODS), one month, or days of one's own; `any_label` names the choice of no span, if there's one. #}
+{% macro dates_field(filters, periods, month_options, any_label="All time") %}
+  <div class="filter-field">
+    <label class="filter-label" for="filter-period">Dates</label>
+    <select name="period" id="filter-period">
+      {% if any_label %}<option value="">{{ any_label }}</option>{% endif %}
+      {% for value, label in periods.items() %}<option value="{{ value }}"{% if filters.period == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      <option value="custom"{% if filters.period == "custom" %} selected{% endif %}>Custom dates…</option>
+      <optgroup label="Months">
+        {% for m in month_options %}<option value="{{ m }}"{% if filters.month == m %} selected{% endif %}>{{ m|month_label }}</option>{% endfor %}
+      </optgroup>
+    </select>
+    <div class="filter-dates">
+      <label>From <input type="date" name="from" value="{{ filters["from"] }}"></label>
+      <label>To <input type="date" name="to" value="{{ filters.to }}"></label>
+    </div>
+  </div>
+{% endmacro %}
+
+{# Choices to tick, each (value, label, color): a color shows the label as a tag. `radio` for one choice only; `long`
+   for a list that scrolls on its own. #}
+{% macro checks(name, legend, choices, checked, radio=false, long=false) %}
+  <fieldset class="filter-field">
+    <legend class="filter-label">{{ legend }}</legend>
+    <div class="filter-choices{% if long %} filter-list{% endif %}">
+      {% for value, label, color in choices %}
+        <label class="check"><input type="{{ 'radio' if radio else 'checkbox' }}" name="{{ name }}" value="{{ value }}"{% if value in checked %} checked{% endif %}>
+          {% if color %}<span class="tag tint-{{ color }}">{{ label }}</span>{% else %}{{ label }}{% endif %}</label>
+      {% endfor %}
+    </div>
+  </fieldset>
+{% endmacro %}

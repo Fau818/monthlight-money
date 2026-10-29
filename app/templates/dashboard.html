@@ -23,6 +23,8 @@
           <div class="hero">{{ dollars }}<span class="cents">{{ cents }}</span></div>
           <div class="spend-sub">
             {% if budget %}<span>{{ left_text(totals.spent, budget, "your " ~ budget|money ~ " budget") }}</span>{% endif %}
+            {% set shown_month = months.bars|selectattr("month", "equalto", month)|first %}
+            {% if months.everyday and shown_month and shown_month.aside > 0 %}<span class="muted">{{ shown_month.everyday|money }} everyday, {{ shown_month.aside|money }} set aside</span>{% endif %}
             {% if pace.this and pace.last|length and pace.last[-1] %}
               {% set diff = pace.this[-1] - pace.last_same_day %}
               {% set by = " by this point" if month == this_month else "" %}
@@ -61,7 +63,21 @@
     </section>
 
     <section class="card">
-      <div class="card-head"><h2>Spending by month</h2><a href="/transactions?month={{ month }}">{{ month|month_name }}'s transactions</a></div>
+      <div class="card-head">
+        <h2>Spending by month</h2>
+        <div class="card-tools">
+          {# Big, rare costs (tuition, say) set aside from everyday spending show apart, hatched gray (main.everyday_page). #}
+          {% if has_everyday %}
+            <form method="post" action="/everyday/shown" class="inline" data-swap>
+              <input type="hidden" name="back" value="{{ here }}"><input type="hidden" name="shown" value="{{ '' if everyday_shown else '1' }}">
+              <button type="submit" class="chip{% if everyday_shown %} on{% endif %}" aria-pressed="{{ 'true' if everyday_shown else 'false' }}"
+                      title="{{ 'Show all spending alike' if everyday_shown else 'Show what you set aside apart from everyday spending' }}">{% if everyday_shown %}{{ icon("check") }} {% endif %}Everyday</button>
+            </form>
+          {% endif %}
+          <a href="/everyday?back={{ here|urlencode }}" data-pane>{{ "Set aside…" if has_everyday else "Set aside big costs" }}</a>
+          <a href="/transactions?month={{ month }}">{{ month|month_name }}'s transactions</a>
+        </div>
+      </div>
       {% if not months.bars|selectattr("spent")|list %}
         <p class="empty">No spending in the last 12 months yet.</p>
       {% else %}
@@ -71,23 +87,31 @@
           <div class="columns">
             {% for b in months.bars %}
               <a class="col{% if b.selected %} selected{% endif %}" href="/?month={{ b.month }}"
-                 aria-label="{{ b.month|month_label }}: {{ b.spent|money }} spent, {{ b.income|money }} income">
-                <span class="bar" style="height: {{ b.height }}%">{% if b.selected %}<span class="cap">{{ b.spent|compact_money }}</span>{% endif %}</span>
-                <span class="tip" aria-hidden="true"><b>{{ b.spent|money }}</b> spent<br>{{ b.income|money }} income<br><span class="muted">{{ b.month|month_label }}</span></span>
+                 aria-label="{{ b.month|month_label }}: {{ b.spent|money }} spent{% if months.everyday %}, {{ b.everyday|money }} of it everyday{% endif %}, {{ b.income|money }} income">
+                <span class="bar" style="height: {{ b.height }}%">
+                  {%- if b.aside_share %}<span class="bar-aside" style="height: {{ b.aside_share }}%"></span>{% endif -%}
+                  {%- if b.selected %}<span class="cap">{{ b.spent|compact_money }}</span>{% endif %}</span>
+                <span class="tip" aria-hidden="true"><b>{{ b.spent|money }}</b> spent
+                  {%- if months.everyday %}<br>{{ b.everyday|money }} everyday{% if b.aside > 0 %}<br>{{ b.aside|money }} set aside{% endif %}{% endif %}
+                  <br>{{ b.income|money }} income<br><span class="muted">{{ b.month|month_label }}</span></span>
               </a>
             {% endfor %}
           </div>
         </div>
         <div class="col-ticks" aria-hidden="true">{% for b in months.bars %}<span>{{ b.tick }}{% if b.year %}<small>{{ b.year }}</small>{% endif %}</span>{% endfor %}</div>
+        {% if months.everyday %}
+          <figcaption class="legend"><span><i class="key box aside-key"></i>Set aside: not everyday spending</span></figcaption>
+        {% endif %}
       </div>
       <details class="chart-table">
         <summary>Show as a table</summary>
         <div class="table-scroll">
           <table class="compact">
-            <thead><tr><th>Month</th><th class="num">Spent</th><th class="num">Income</th><th class="num">Income minus spending</th></tr></thead>
+            <thead><tr><th>Month</th><th class="num">Spent</th>{% if months.everyday %}<th class="num">Everyday</th><th class="num">Set aside</th>{% endif %}<th class="num">Income</th><th class="num">Income minus spending</th></tr></thead>
             <tbody>
               {% for b in months.bars|reverse %}
                 <tr><td><a href="/?month={{ b.month }}">{{ b.month|month_label }}</a></td><td class="num">{{ b.spent|money }}</td>
+                  {% if months.everyday %}<td class="num">{{ b.everyday|money }}</td><td class="num">{{ b.aside|money }}</td>{% endif %}
                   <td class="num">{{ b.income|money }}</td><td class="num">{{ (b.income - b.spent)|money }}</td></tr>
               {% endfor %}
             </tbody>
@@ -96,6 +120,30 @@
       </details>
       {% endif %}
     </section>
+
+    {% for r in pinned %}
+      {# A report pinned to the dashboard (main.pinned_reports): what it shows came to, by its columns. #}
+      <section class="card pinned-report">
+        <div class="card-head"><h2>{{ icon("pin") }} {{ r.name }}</h2><a href="{{ r.link }}">Open the report</a></div>
+        <p class="muted small">{{ r.span.label }} · {{ r.span.dates }}</p>
+        <div class="stat-value">{{ r.total|money }}<span class="muted small"> {{ "spent" if r.show == "spending" else "income" }}</span></div>
+        {% if r.bars|length > 1 %}
+          <div class="columns-chart mini">
+            <div class="columns-plot">
+              <div class="columns">
+                {% for b in r.bars %}
+                  <a class="col" href="{{ r.link }}" aria-label="{{ b.label }}: {{ b.total|money }}">
+                    <span class="bar" style="height: {{ b.height }}%"></span>
+                    <span class="tip" aria-hidden="true"><b>{{ b.total|money }}</b><br><span class="muted">{{ b.label }}</span></span>
+                  </a>
+                {% endfor %}
+              </div>
+            </div>
+            <div class="col-ticks" aria-hidden="true">{% for b in r.bars %}<span>{{ b.tick }}{% if b.year %}<small>{{ b.year }}</small>{% endif %}</span>{% endfor %}</div>
+          </div>
+        {% endif %}
+      </section>
+    {% endfor %}
   </div>
 
   <div class="dash-side">

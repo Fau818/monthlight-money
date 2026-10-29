@@ -12,7 +12,8 @@ from app.main import bank_details, create_app, find_transactions, month_chunk
 from app.plaid_client import PlaidError
 from tests.conftest import COPILOT_CSV, FakePlaid, page, plaid_account, plaid_txn
 
-PAGES = ["/", "/transactions", "/budgets", "/recurring", "/accounts", "/categories", "/import", "/settings", "/names"]
+PAGES = ["/", "/transactions", "/reports", "/reports/transactions", "/everyday", "/budgets", "/recurring", "/accounts", "/categories",
+         "/import", "/settings", "/names"]
 
 
 def test_every_page_loads_when_empty(client):
@@ -983,3 +984,102 @@ def test_odd_ids_typed_into_a_form_are_ignored(client, settings):
     conn = sync.connect(settings.db_path)
     assert conn.execute("SELECT category_id FROM transactions WHERE name = 'Odd id'").fetchone()[0] is None
     conn.close()
+
+
+def test_reports_add_up_spending_by_what_they_group_by(client, settings):
+    import_sample(client, settings)
+    conn = sync.connect(settings.db_path)
+    food = conn.execute("SELECT id FROM categories WHERE name = 'Food'").fetchone()[0]
+    text = unescape(client.get("/reports").text)
+    assert "Last 12 months · Nov 2025 – Oct 2026" in text and "Spending by category" in text
+    # 54.20 + 61.10 for groceries, 3 × 15.49, a 20.00 refund and 40.00 of gas; the transfers count nowhere.
+    assert "$181.77 in all" in text and "$2,500.00" in text
+    assert '<a href="/reports">Reports</a>' not in text and 'href="/reports" class=" active"' in text  # in the sidebar, lit up
+    # An address that holds the filters otherwise leads to the tidy one, the defaults left out.
+    tidy = client.get("/reports?period=last-12-months&by=month&show=spending&group=category&not_merchant=&over=", follow_redirects=False)
+    assert tidy.status_code == 303 and tidy.headers["location"] == "/reports"
+    for query in ("by=quarter", "by=year", "group=merchant", "group=account", "group=tag", "show=income", "period=this-month",
+                  "period=custom&from=2026-09-05&to=2026-10-10", "month=2026-09", "period=this-year&by=quarter"):
+        assert client.get(f"/reports?{query}").status_code == 200, query
+    # A part of the chart opens its transactions: September's food, its groceries among them.
+    part = unescape(client.get(f"/reports/transactions?column=2026-09&key={food}").text)
+    assert "September 2026" in part and part.count("Trader Joe's") == 2 and "$115.30" in part
+    every = unescape(client.get("/reports/transactions?column=2026-09").text)
+    assert "Netflix" in every and "Acme Payroll" not in every  # spending only, every series
+    conn.close()
+
+
+def test_reports_leave_out_what_you_pick(client, settings):
+    import_sample(client, settings)
+    conn = sync.connect(settings.db_path)
+    food = conn.execute("SELECT id FROM categories WHERE name = 'Food'").fetchone()[0]
+    shell = conn.execute("SELECT id FROM transactions WHERE name = 'Shell'").fetchone()[0]
+    text = unescape(client.get(f"/reports?not_category={food}").text)
+    assert "$66.47 in all" in text and "Not Food" in text  # 181.77 without the groceries
+    assert 'href="/reports" title="Count it again"' in text  # its chip removes it
+    assert "$141.77 in all" in unescape(client.get(f"/reports?not_id={shell}").text)
+    assert "Not Shell, Oct 3" in unescape(client.get(f"/reports?not_id={shell}").text)
+    assert "$201.77 in all" in unescape(client.get("/reports?not_merchant=amazon").text)  # without its refund, whatever the case
+    text = unescape(client.get("/reports?over=50").text)
+    assert "$66.47 in all" in text and "Nothing over $50" in text  # Trader Joe's 54.20 and 61.10 left out
+    # The biggest expenses offer to leave each out.
+    page = client.get("/reports").text
+    assert f"not_id={shell}" in page
+    conn.close()
+
+
+def test_everyday_spending_sets_big_costs_aside(client, settings):
+    import_sample(client, settings)
+    conn = sync.connect(settings.db_path)
+    shell = conn.execute("SELECT id FROM transactions WHERE name = 'Shell'").fetchone()[0]
+    dashboard = client.get("/?month=2026-10").text
+    assert "Set aside big costs" in dashboard and 'action="/everyday/shown"' not in dashboard  # nothing set aside yet
+    sheet = unescape(client.get(f"/transactions/{shell}").text)
+    assert "Set aside: not everyday spending" in sheet
+    text = unescape(client.post(f"/everyday/transactions/{shell}", data={"aside": "1", "back": f"/transactions/{shell}"}).text)
+    assert "Set aside “Shell”" in text and "Count as everyday spending again" in text and ">Set aside</a>" in text
+    # The dashboard's months show it apart once Everyday is on.
+    client.post("/everyday/shown", data={"shown": "1", "back": "/"})
+    dashboard = unescape(client.get("/?month=2026-10").text)
+    assert 'aria-pressed="true"' in dashboard and "$0.00 everyday, $40.00 set aside" in dashboard and "bar-aside" in dashboard
+    assert "$141.77 in all" in unescape(client.get("/reports?everyday=1").text)
+    # The page of what's set aside changes it: a category, a size, a merchant; unticking the transaction counts it again.
+    groceries = conn.execute("SELECT id FROM categories WHERE name = 'Groceries'").fetchone()[0]
+    client.post("/everyday", data={"category": [str(groceries)], "over": "1,000", "merchant": ["Netflix", " "], "back": "/"})
+    assert reports.everyday(conn) == {**reports.no_leave_outs(), "category": [str(groceries)], "merchant": ["Netflix"], "over": 1000.0}
+    page = unescape(client.get("/everyday").text)
+    assert "What isn't everyday spending" in page and 'value="1000"' in page
+    assert client.post("/everyday", data={"over": "lots"}).status_code == 200  # unreadable: says so, changes nothing
+    assert reports.everyday(conn)["over"] == 1000.0
+    client.post("/everyday/shown", data={"shown": "", "back": "/"})
+    assert 'aria-pressed="false"' in client.get("/").text
+    conn.close()
+
+
+def test_reports_can_be_saved_and_pinned_to_the_dashboard(client, settings):
+    import_sample(client, settings)
+    conn = sync.connect(settings.db_path)
+    response = client.post("/reports/saved", data={"name": " Where it goes ", "query": "group=merchant&saved=99&by=nonsense"},
+                           follow_redirects=False)
+    rid = conn.execute("SELECT id FROM saved_reports").fetchone()[0]
+    assert response.headers["location"] == f"/reports?group=merchant&saved={rid}"
+    assert tuple(conn.execute("SELECT name, query, pinned FROM saved_reports").fetchone()) == ("Where it goes", "group=merchant", 0)
+    text = unescape(client.get(f"/reports?group=merchant&saved={rid}").text)
+    assert "<title>Where it goes</title>" in text and "Pin to dashboard" in text and "Save changes" not in text
+    assert "Save changes" in client.get(f"/reports?group=account&saved={rid}").text  # changed since it was saved
+    client.post(f"/reports/saved/{rid}", data={"pinned": "1", "back": "/reports"})
+    dashboard = unescape(client.get("/").text)
+    assert "Where it goes" in dashboard and f"/reports?group=merchant&saved={rid}" in dashboard and "$181.77" in dashboard
+    client.post(f"/reports/saved/{rid}", data={"name": "Merchants", "query": "group=tag"})
+    assert tuple(conn.execute("SELECT name, query, pinned FROM saved_reports").fetchone()) == ("Merchants", "group=tag", 1)
+    assert client.post("/reports/saved/999", data={"name": "x"}).status_code == 404
+    response = client.post(f"/reports/saved/{rid}/delete", follow_redirects=False)
+    assert response.headers["location"] == "/reports?group=tag" and conn.execute("SELECT count(*) FROM saved_reports").fetchone()[0] == 0
+    conn.close()
+
+
+def test_reports_are_in_the_sidebar_and_under_more_on_a_phone(client):
+    text = client.get("/").text
+    sidebar, more = text.split('<aside class="sidebar">')[1].split("</aside>")[0], text.split('class="more-menu"')[1].split("</details>")[0]
+    assert 'href="/reports"' in sidebar and 'href="/reports"' in more
+    assert 'href="/reports"' not in text.split('<nav class="tabbar"')[1]  # the tab bar keeps its five

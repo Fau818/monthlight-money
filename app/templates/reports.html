@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon, badge, stacked_chart with context %}
+{% from "_filters.html" import filter_menu, checks %}
+{% block title %}{{ current.name if current else "Reports" }}{% endblock %}
+{# How a total compares with the spans before (main.report_view): ↑ or ↓, by how much, from when. For spending, more is
+   drawn as the dashboard draws it. #}
+{% macro changes(name, spending=false) %}
+  {% for t in then %}
+    {% set c = t.changes[name] %}
+    {% if c and c.diff %}
+      {% set up = c.diff > 0 %}
+      <span class="kpi-change{% if spending %}{{ ' over-text' if up else ' good-text' }}{% endif %}" title="{{ t[name]|money }} {{ t.label }} ({{ t.dates }})">
+        {{ "↑" if up else "↓" }} {% if c.percent is not none %}{{ c.percent|abs }}%{% else %}{{ c.diff|abs|money }}{% endif %} from {{ t.label }}</span>
+    {% elif c %}
+      <span class="kpi-change">Same as {{ t.label }}</span>
+    {% endif %}
+  {% endfor %}
+{% endmacro %}
+{% block content %}
+<div class="page-head">
+  <div class="page-title">
+    <h1>{{ current.name if current else "Reports" }}</h1>
+    <p class="muted">{{ span.label }} · {{ span.dates }}</p>
+  </div>
+  <div class="head-actions">
+    {% if current %}
+      {% if changed %}
+        <form method="post" action="/reports/saved/{{ current.id }}" class="inline">
+          <input type="hidden" name="query" value="{{ own_query }}">
+          <button type="submit" class="primary">Save changes</button>
+        </form>
+      {% endif %}
+      <form method="post" action="/reports/saved/{{ current.id }}" class="inline" data-swap>
+        <input type="hidden" name="back" value="{{ here }}"><input type="hidden" name="pinned" value="{{ 0 if current.pinned else 1 }}">
+        <button type="submit"{% if current.pinned %} class="on"{% endif %} title="{{ 'Take it off the dashboard' if current.pinned else 'Show it on the dashboard' }}">
+          {{ icon("pin") }} {{ "On the dashboard" if current.pinned else "Pin to dashboard" }}</button>
+      </form>
+      <details class="more-menu report-menu">
+        <summary class="icon-btn" aria-label="More for this report">{{ icon("more") }}</summary>
+        <div class="menu">
+          <form method="post" action="/reports/saved/{{ current.id }}" class="menu-form">
+            <input type="hidden" name="back" value="{{ here }}">
+            <label>Name <input name="name" value="{{ current.name }}" required></label>
+            <button type="submit" class="small">Rename</button>
+          </form>
+          <form method="post" action="/reports/saved/{{ current.id }}/delete" data-confirm="Delete the report “{{ current.name }}”?">
+            <button type="submit" class="link danger-text">Delete this report</button>
+          </form>
+        </div>
+      </details>
+    {% endif %}
+    <details class="more-menu report-menu">
+      <summary class="button{% if not current %} primary{% endif %}">{{ icon("plus") }} {{ "Save as new" if current else "Save" }}</summary>
+      <div class="menu">
+        <form method="post" action="/reports/saved" class="menu-form">
+          <input type="hidden" name="query" value="{{ own_query }}">
+          <label>Name <input name="name" placeholder="For example, This year without rent" required></label>
+          <button type="submit" class="small primary">Save the report</button>
+        </form>
+      </div>
+    </details>
+  </div>
+</div>
+
+{% if saved_reports %}
+  <nav class="saved-reports" aria-label="Saved reports">
+    <a class="chip{% if not current %} on{% endif %}" href="/reports"{% if not current %} aria-current="page"{% endif %}>New report</a>
+    {% for r in saved_reports %}
+      {% set on = current and current.id == r.id %}
+      <a class="chip{% if on %} on{% endif %}" href="/reports?{{ r.query }}{{ '&' if r.query }}saved={{ r.id }}"{% if on %} aria-current="page"{% endif %}>
+        {%- if r.pinned %}{{ icon("pin") }}{% endif %}{{ r.name }}</a>
+    {% endfor %}
+  </nav>
+{% endif %}
+
+{# What the report shows and how: applied as soon as something changes (app.js), or with "Show" without JavaScript.
+   What it leaves out is in a filter menu like the transactions list's. #}
+<form method="get" class="toolbar" action="/reports" data-filters>
+  {% if filters.saved %}<input type="hidden" name="saved" value="{{ filters.saved }}">{% endif %}
+  <div class="filters">
+    {% call filter_menu(menu_count, "Leave out") %}
+      <div class="filter-col">
+        <div class="filter-field">
+          <span class="filter-label">Everyday spending</span>
+          <label class="check"><input type="checkbox" name="everyday" value="1"{% if filters.everyday %} checked{% endif %}> Leave out what isn't everyday spending</label>
+          <p class="filter-hint">{% if has_everyday %}What you set aside: tuition, say.{% else %}Nothing is set aside yet.{% endif %}
+            <a href="/everyday?back={{ here|urlencode }}" data-pane>{{ "Change it" if has_everyday else "Set some aside" }}</a></p>
+        </div>
+        <div class="filter-field">
+          <label class="filter-label" for="leave-over">Anything over</label>
+          <input id="leave-over" name="over" value="{{ filters.over }}" inputmode="decimal" placeholder="An amount, like 1000">
+          <p class="filter-hint">Money in and out alike.</p>
+        </div>
+        <div class="filter-field">
+          <label class="filter-label" for="leave-merchant">Merchants</label>
+          {% for m in filters.not_merchant %}
+            <label class="check"><input type="checkbox" name="not_merchant" value="{{ m }}" checked> {{ m }}</label>
+          {% endfor %}
+          <input id="leave-merchant" name="not_merchant" list="merchant-names" placeholder="A merchant's name" autocomplete="off">
+          <datalist id="merchant-names">{% for n in merchant_names %}<option value="{{ n }}">{% endfor %}</datalist>
+        </div>
+        {% if filters.not_id %}
+          <fieldset class="filter-field">
+            <legend class="filter-label">Transactions</legend>
+            {% for i in filters.not_id %}<input type="hidden" name="not_id" value="{{ i }}">{% endfor %}
+            <p class="filter-hint">{{ plural(filters.not_id|length, "transaction") }} you left out from the lists below. Remove them with their chips.</p>
+          </fieldset>
+        {% endif %}
+      </div>
+      <div class="filter-col">
+        {{ checks("not_category", "Categories", [("none", "Uncategorized", none)] + choices.categories, filters.not_category, long=true) }}
+        {{ checks("not_account", "Accounts", choices.accounts, filters.not_account, long=true) }}
+        {% if choices.tags %}{{ checks("not_tag", "Tags", choices.tags, filters.not_tag, long=true) }}{% endif %}
+      </div>
+      <div class="filter-actions">
+        <button type="submit" class="primary">Show the report</button>
+        {% if menu_count %}<a href="{{ report_link(not_category=[], not_account=[], not_tag=[], not_merchant=[], not_id=[], over='', everyday='') }}">Leave nothing out</a>{% endif %}
+      </div>
+    {% endcall %}
+    <label class="sort report-dates">{{ icon("calendar") }}<span class="sr-only">Dates</span>
+      <select name="period" class="chip-select" aria-label="Dates">
+        {% for value, label in periods.items() %}<option value="{{ value }}"{% if filters.period == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+        <option value="custom"{% if filters.period == "custom" %} selected{% endif %}>Custom dates…</option>
+        <optgroup label="Months">
+          {% for m in month_options %}<option value="{{ m }}"{% if filters.month == m %} selected{% endif %}>{{ m|month_label }}</option>{% endfor %}
+        </optgroup>
+      </select>
+    </label>
+    <span class="custom-dates">
+      <label><span class="sr-only">From</span><input type="date" name="from" value="{{ filters["from"] }}" aria-label="From"></label>
+      <span class="muted">to</span>
+      <label><span class="sr-only">To</span><input type="date" name="to" value="{{ filters.to }}" aria-label="To"></label>
+    </span>
+    {% for name, options in [("by", report_by), ("show", report_shows), ("group", report_groups)] %}
+      <select name="{{ name }}" class="chip-select" aria-label="{{ {'by': 'Totals', 'show': 'Show', 'group': 'Group'}[name] }}">
+        {% for value, label in options.items() %}<option value="{{ value }}"{% if filters[name] == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    {% endfor %}
+    <button type="submit" class="js-hide">Show</button>
+  </div>
+  {% if chips %}
+    <div class="active-filters">
+      {% for c in chips %}<a class="chip on" href="{{ c.remove }}" title="Count it again">{{ c.label }} {{ icon("close") }}<span class="sr-only">(remove)</span></a>{% endfor %}
+    </div>
+  {% endif %}
+</form>
+
+<section class="card report-totals" aria-label="Totals">
+  <dl class="kpi-grid">
+    <div class="kpi"><dt>Spent</dt><dd>{{ now.spent|money }}</dd>{{ changes("spent", spending=true) }}</div>
+    <div class="kpi"><dt>Income</dt><dd class="{% if now.income > 0 %}money-in{% endif %}">{{ now.income|money }}</dd>{{ changes("income") }}</div>
+    <div class="kpi"><dt>Income minus spending</dt><dd class="{% if now.net < 0 %}over-text{% endif %}">{{ now.net|money }}</dd>{{ changes("net") }}</div>
+    <div class="kpi"><dt>Kept of your income</dt><dd>{{ ("%g%%"|format(now.rate)) if now.rate is not none else "—" }}</dd>
+      {% for t in then if t.rate_change %}<span class="kpi-change">{{ "↑" if t.rate_change > 0 else "↓" }} {{ "%g"|format(t.rate_change|abs) }} points from {{ t.label }}</span>{% endfor %}</div>
+    <div class="kpi"><dt>Spent a month, on average</dt><dd>{{ per_month.spent|money }}</dd>
+      {% if per_month.left_out %}<span class="kpi-change">Leaves out {{ span.months[-1]|month_name }}, still under way</span>{% endif %}</div>
+  </dl>
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <h2>{{ report_shows[filters.show] }} {{ report_groups[filters.group]|lower }}{{ ", " ~ report_by[filters.by]|lower if filters.by != "month" }}</h2>
+    {% if data.count %}<span class="muted small">{{ data.total|money }} in all · {{ plural(data.count, "transaction") }}</span>{% endif %}
+  </div>
+  {% if data.count %}
+    {{ stacked_chart(chart, stack, report_shows[filters.show] ~ " " ~ report_groups[filters.group]|lower ~ ", " ~ span.dates) }}
+    {% if several_tags %}<p class="muted small">A transaction with several tags counts under each of them, so the parts can add up to more than the whole.</p>{% endif %}
+    <details class="chart-table">
+      <summary>Show as a table</summary>
+      <div class="table-scroll">
+        <table class="compact report-table">
+          <thead><tr><th>{{ report_groups[filters.group][3:]|capitalize }}</th>{% for col in chart.columns %}<th class="num">{{ col.label }}</th>{% endfor %}
+            <th class="num">In all</th>{% if earlier %}<th class="num">From {{ earlier[0].label }}</th>{% endif %}<th><span class="sr-only">Leave out</span></th></tr></thead>
+          <tbody>
+            {% for s in series %}
+              <tr>
+                <td><span class="key box tint-{{ s.color }}"></span> <a href="{{ s.link }}" data-pane>{{ s.label }}</a></td>
+                {% for cell in s.cells %}<td class="num">{% if cell.value %}<a href="{{ cell.link }}" data-pane>{{ cell.value|money }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>{% endfor %}
+                <td class="num"><strong>{{ s.total|money }}</strong></td>
+                {% if earlier %}<td class="num">{% if s.change and s.change.diff %}{{ "+" if s.change.diff > 0 else "−" }}{{ s.change.diff|abs|money }}{% else %}—{% endif %}</td>{% endif %}
+                <td>{% if s.leave_out %}<a class="small" href="{{ s.leave_out }}">Leave out</a>{% endif %}</td>
+              </tr>
+            {% endfor %}
+            <tr class="table-total"><td>In all</td>{% for col in chart.columns %}<td class="num"><a href="{{ col.link }}" data-pane>{{ col.total|money }}</a></td>{% endfor %}
+              <td class="num"><strong>{{ data.total|money }}</strong></td>{% if earlier %}<td></td>{% endif %}<td></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </details>
+  {% else %}
+    <p class="empty">No {{ report_shows[filters.show]|lower }} on these dates{{ ", with what's left out" if chips }}.</p>
+  {% endif %}
+</section>
+
+{% if top_merchants or biggest %}
+<div class="report-lists">
+  <section class="card">
+    <div class="card-head"><h2>{{ "Top merchants" if filters.show == "spending" else "Where it came from" }}</h2></div>
+    <ul class="bar-list">
+      {% for m in top_merchants %}
+        <li>
+          <a class="bar-row" href="{{ m.link }}" data-pane>
+            <span class="bar-name">{{ m.label }}</span>
+            <span class="num">{{ m.total|money }}</span>
+            <span class="bar-track" aria-hidden="true"><span style="width: {{ m.share }}%"></span></span>
+            <span class="muted small">{{ plural(m.count, "transaction") }}</span>
+          </a>
+          <a class="icon-btn leave-out" href="{{ m.leave_out }}" title="Leave {{ m.label }} out of this report" aria-label="Leave {{ m.label }} out of this report">{{ icon("close") }}</a>
+        </li>
+      {% endfor %}
+    </ul>
+  </section>
+  <section class="card">
+    <div class="card-head"><h2>{{ "Biggest expenses" if filters.show == "spending" else "Biggest income" }}</h2></div>
+    <ul class="link-rows big-rows">
+      {% for b in biggest %}
+        <li>
+          {{ badge(transaction_look(looks, "regular" if filters.show == "spending" else "income", b.category_id), "small") }}
+          <a class="linked" href="/transactions/{{ b.id }}?back={{ here|urlencode }}">
+            <span>{{ b.name }}</span><span class="muted small">{{ b.date|short_date }}{% if b.date[:4] != span.dates[-4:] %}, {{ b.date[:4] }}{% endif %} · {{ account_labels.get(b.account_id, "") }}{% if b.paid_back %} · {{ b.paid_back|money }} paid back{% endif %}</span>
+            <span class="num{% if b.amount > 0 %} money-in{% endif %}">{{ b.amount|amount }}</span></a>
+          <a class="icon-btn leave-out" href="{{ b.leave_out }}" title="Leave it out of this report" aria-label="Leave {{ b.name }} out of this report">{{ icon("close") }}</a>
+        </li>
+      {% endfor %}
+    </ul>
+  </section>
+</div>
+{% endif %}
+{% endblock %}

@@ -92,6 +92,13 @@
         <summary class="icon-btn" aria-label="More actions">{{ icon("more") }}</summary>
         <div class="menu">
           {% for name, label in menu %}<button type="button" data-show="{{ name }}">{{ label }}</button>{% endfor %}
+          {% if t.type == "regular" and not purchase %}
+            {# Big, rare costs (tuition, say) still count, but apart from everyday spending (main.everyday_page). #}
+            <form method="post" action="/everyday/transactions/{{ t.id }}" data-swap>
+              <input type="hidden" name="back" value="{{ here }}"><input type="hidden" name="aside" value="{{ 0 if set_aside else 1 }}">
+              <button type="submit">{{ "Count as everyday spending again" if set_aside else "Set aside: not everyday spending" }}</button>
+            </form>
+          {% endif %}
           <a href="/transactions?amount={{ '%.2f'|format(t.amount|abs) }}">Find others with this amount</a>
         </div>
       </details>
@@ -119,7 +126,8 @@
       {% elif parts %}<p class="muted small">{{ "They're" if combined else "The parts are" }} dated like it.</p>{% endif %}
     {% endif %}
     <h1 class="sheet-name"><input name="name" value="{{ t.name }}" required aria-label="Name" form="sheet-form"></h1>
-    <div class="sheet-amount{% if t.amount > 0 %} money-in{% endif %}">{{ t.amount|amount_html }}{% if t.pending or (split_parent and split_parent.pending) %} <span class="badge">Pending</span>{% endif %}</div>
+    <div class="sheet-amount{% if t.amount > 0 %} money-in{% endif %}">{{ t.amount|amount_html }}{% if t.pending or (split_parent and split_parent.pending) %} <span class="badge">Pending</span>{% endif %}
+      {%- if set_aside %} <a class="badge" href="/everyday?back={{ here|urlencode }}" data-pane title="It counts, but not as everyday spending">Set aside</a>{% endif %}</div>
   </section>
 
   {% if parts %}

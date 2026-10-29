@@ -71,7 +71,8 @@ async function fetchPage(url, options) {
 }
 
 // Transactions open in a pane instead of on their own page, so the list stays where it was: beside the list on a wide
-// screen, where the list can still be used and another row opens in its place, and over the page elsewhere.
+// screen, where the list can still be used and another row opens in its place, and over the page elsewhere. So do
+// other pages' details, from links marked data-pane: a part of a report's chart, say.
 const drawer = document.querySelector("[data-drawer]");
 const wide = window.matchMedia("(min-width: 1280px)");
 let openId = null;  // the transaction the pane shows
@@ -211,7 +212,7 @@ document.addEventListener("click", (event) => {
     closeDrawer();
     return;
   }
-  const link = event.target.closest && event.target.closest("a.txn-name, a.linked, a.mark:not([data-jump])");
+  const link = event.target.closest && event.target.closest("a.txn-name, a.linked, a.mark:not([data-jump]), a[data-pane]");
   if (!link) return;
   event.preventDefault();
   openTransaction(link.href).catch(() => window.location.assign(link.href));

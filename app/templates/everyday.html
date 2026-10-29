@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% from "_macros.html" import icon with context %}
+{% from "_filters.html" import checks %}
+{% block title %}Everyday spending{% endblock %}
+{% block content %}
+<p><a class="back" href="{{ back }}">{{ icon("left") }} Back</a></p>
+{# What's set aside from everyday spending (main.everyday_page): in the pane, or on its own page. Each change saves at once. #}
+<div class="sheet" data-transaction="everyday">
+  <header class="sheet-bar"><h2 class="sheet-kind">Everyday spending</h2></header>
+  <section class="sheet-hero">
+    <h1 class="sheet-name">What isn't everyday spending</h1>
+    <p class="muted">Set aside the big, rare costs, like tuition or a move, to see what you spend from day to day. They still count everywhere;
+      {% if shown %}the dashboard shows them{% else %}with <strong>Everyday</strong> on, the dashboard shows them{% endif %} in gray, on top of each month's bar, and reports can leave them out.</p>
+    {% if set_aside %}<p><strong>{{ set_aside|money }}</strong> set aside in the last 12 months.</p>{% endif %}
+  </section>
+  <form method="post" action="/everyday" class="everyday-form" data-autosave data-swap>
+    <input type="hidden" name="back" value="{{ back }}"><input type="hidden" name="quiet" value="">
+    {% if picked %}
+      <fieldset class="filter-field">
+        <legend class="filter-label">Transactions you set aside</legend>
+        <div class="filter-choices filter-list">
+          {% for t in picked %}
+            <label class="check"><input type="checkbox" name="ids" value="{{ t.id }}" checked>
+              <span>{{ t.name }} <span class="muted small">{{ t.date|short_date }}{% if t.date[:4] != today_year %}, {{ t.date[:4] }}{% endif %} · {{ t.amount|amount }}</span></span></label>
+          {% endfor %}
+        </div>
+        <p class="filter-hint">Untick one to count it as everyday spending again. Set aside more from a transaction's ⋯ menu.</p>
+      </fieldset>
+    {% else %}
+      <p class="muted small">To set aside a single transaction, open it and pick <strong>Set aside: not everyday spending</strong> under ⋯.</p>
+    {% endif %}
+    <div class="filter-field">
+      <label class="filter-label" for="aside-over">Anything over</label>
+      <input id="aside-over" name="over" value="{{ ('%.2f'|format(aside.over)).removesuffix('.00') if aside.over else '' }}" inputmode="decimal" placeholder="An amount, like 1500">
+      <p class="filter-hint">Each transaction bigger than this, whatever it was for.</p>
+    </div>
+    {{ checks("category", "Categories", [("none", "Uncategorized", none)] + choices.categories, aside.category|map("string")|list, long=true) }}
+    {% if choices.tags %}{{ checks("tag", "Tags", choices.tags, aside.tag|map("string")|list, long=true) }}{% endif %}
+    <div class="filter-field">
+      <label class="filter-label" for="aside-merchant">Merchants</label>
+      {% for m in aside.merchant %}<label class="check"><input type="checkbox" name="merchant" value="{{ m }}" checked> {{ m }}</label>{% endfor %}
+      <input id="aside-merchant" name="merchant" list="aside-merchant-names" placeholder="A merchant's name" autocomplete="off">
+      <datalist id="aside-merchant-names">{% for n in merchant_names %}<option value="{{ n }}">{% endfor %}</datalist>
+    </div>
+    <noscript><button type="submit" class="primary">Save</button></noscript>
+  </form>
+</div>
+{% endblock %}
