@@ -62,8 +62,7 @@ workspace, in the style of Copilot Money's Mac app.
 
 In this order, each step its own release.
 
-1. **The other pages** laid out like the transactions: the dashboard, budgets, recurring, accounts and settings.
-2. **Reports: where the money goes.**
+1. **Reports: where the money goes.**
    - Pick a period: this month, the last 3 or 12 months, year to date, last year, or custom. Totals come by month,
      quarter or year.
    - Show spending, income, net and savings rate, grouped by category, merchant, account or tag.
@@ -76,18 +75,26 @@ In this order, each step its own release.
      - top merchants and biggest expenses
    - Click a bar to see its transactions. Save a report and pin it to the dashboard.
    - It reuses the filter menu.
+2. **The other pages** laid out like the transactions: the dashboard, budgets, recurring, accounts and settings.
 3. **Categories and budgets.**
    - Budgets move into a Categories page with spending pace and expected recurring charges.
    - Each category gets its own page: history, average, year to date and top merchants.
-   - Budget rollover and budgets that differ by month.
+   - Budget rollover, for the categories you pick: what's left of a month's budget, or what went over it, carries into
+     the next month. Budgets that differ by month.
+4. **A month in review.**
+   - A page for each month: what was spent against the budget, income and the savings rate, the categories and
+     merchants that changed most from the month before, the biggest expenses, and how net worth moved.
+   - The dashboard offers last month's review in the first days of a new month.
+5. **A page for each account.**
+   - Its balance over time, its transactions, and for a card, how much of its limit is used.
+   - The sidebar's accounts open their pages.
+6. **A recurring calendar.**
+   - The month's recurring charges and paydays on a calendar.
+   - What's due before the next payday.
 
-## Later
+## v0.3: investments, and maybe savings goals
 
-Not planned in detail yet:
-
-- a month-in-review summary
-- a page for each account, with its balance history
-- a recurring calendar
-- importing CSV files from other banks
-- savings goals
-- investment holdings
+- **Investments:** what each investment account holds, from Plaid: its holdings, their value and how it changed.
+  Investments count in net worth.
+- **Savings goals**, if they turn out to be wanted: a target, a date, and an account it's saved in; how far along it
+  is, and how much a month it takes to get there in time.
