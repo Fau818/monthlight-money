@@ -283,8 +283,47 @@ label.check input { min-height: 0; }
 .search input { width: 100%; min-height: 44px; padding-left: 40px; border-radius: 12px; font-size: 1rem; }
 @media (min-width: 960px) { .toolbar .search { display: none; } }  /* the sidebar's search field takes its place */
 .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.filters .icon { width: 16px; height: 16px; }
+/* The filter menu: a panel under its button with a labeled field for each filter, in two columns (one on a phone). */
+.filter-menu > summary { list-style: none; cursor: pointer; user-select: none; }
+.filter-menu > summary::-webkit-details-marker { display: none; }
+.filter-menu { position: relative; }
+.filter-panel { position: absolute; z-index: 30; top: calc(100% + 8px); left: 0; width: min(680px, calc(100vw - 32px)); max-height: min(72vh, 660px);
+  overflow: auto; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 26px; padding: 16px 18px 14px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 14px 40px rgba(11, 23, 38, 0.18); }
+.filter-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.filter-field { border: 0; margin: 0; padding: 0; min-width: 0; }
+.filter-label { display: block; margin: 0 0 6px; padding: 0; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.filter-field select, .filter-field input:not([type=checkbox], [type=radio]) { width: 100%; min-height: 34px; padding: 4px 9px; font-size: 0.9rem; }
+.filter-dates { display: none; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; margin-top: 8px; }
+.filter-dates label { display: grid; gap: 3px; font-size: 0.78rem; color: var(--muted); }
+.filter-field:has(option[value=custom]:checked) .filter-dates { display: grid; }
+.filter-amount { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 8px; align-items: center; }
+.filter-amount > .amount-and, .filter-amount > [name=amount_max] { display: none; }
+.filter-amount:has(option[value=""]:checked) { grid-template-columns: minmax(0, 1fr); }
+.filter-amount:has(option[value=""]:checked) > [name=amount_min] { display: none; }
+.filter-amount:has(option[value=between]:checked) { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) auto minmax(0, 1fr); }
+.filter-amount:has(option[value=between]:checked) > :is(.amount-and, [name=amount_max]) { display: block; }
+.amount-and { font-size: 0.85rem; color: var(--muted); }
+.filter-hint { margin: 5px 0 0; font-size: 0.75rem; color: var(--muted); }
+.filter-choices { display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.filter-choices label.check { font-size: 0.9rem; gap: 7px; }
+.filter-list { flex-direction: column; flex-wrap: nowrap; gap: 7px; max-height: 214px; overflow: auto; overscroll-behavior: contain; }
+.filter-list .tag { font-size: 0.78rem; }
+.filter-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 18px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 0.9rem; }
+/* The filters in use, as chips that remove them. */
+.active-filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.active-filters .chip .icon { width: 14px; height: 14px; margin-right: -4px; opacity: 0.8; }
+.active-filters .chip:hover .icon { opacity: 1; }
+.sort { position: relative; display: inline-flex; align-items: center; }
+.sort > .icon { position: absolute; left: 11px; color: var(--muted); pointer-events: none; }
+.sort > select { padding-left: 32px; }
 .list-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; color: var(--muted); font-size: 0.85rem; margin: 6px 0 12px; }
 .list-summary form { margin-left: auto; }
+.list-totals { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; }
+.list-totals > div { display: flex; gap: 6px; }
+.list-totals dd { margin: 0; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.list-totals dd.money-in { color: var(--in); }
 /* The list: a card for each month, with its totals on top (main.by_month), then its days. */
 .list-card { padding: 0 20px; }
 .month + .month { margin-top: 16px; }
@@ -311,6 +350,7 @@ ul.txns, .cat-list, .sub-list, .upcoming, .groups, .rec-list, .acct-list, .conn-
 .txn-sub { flex: 0 1000 auto; display: flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; color: var(--muted); font-size: 0.8rem; white-space: nowrap; }
 .txn-sub > * { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }  /* what doesn't fit ends in "…" */
 .txn-sub > .txn-acct { flex-shrink: 4; min-width: 3em; }
+.txn-sub > .txn-day { flex: none; color: var(--ink-2); font-variant-numeric: tabular-nums; }  /* in a list that days don't group */
 .txn-sub > .badge, .txn-sub > .mark:not(:has(.mark-text)) { flex: none; }
 .mark { display: inline-flex; align-items: center; gap: 3px; min-width: 0; color: var(--muted); }
 .mark-text, .txn-sub .tag { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -346,6 +386,9 @@ ul.txns { container-type: inline-size; }
   .month-link { margin-left: 0; }
   .filters { flex-wrap: nowrap; overflow-x: auto; margin: 0 -16px; padding: 0 16px 2px; scrollbar-width: none; }
   .filters::-webkit-scrollbar { display: none; }
+  /* NOTE: fixed, as the row of filters scrolls sideways and would clip a panel inside it */
+  .filter-panel { position: fixed; top: auto; left: 8px; right: 8px; bottom: calc(76px + env(safe-area-inset-bottom)); width: auto;
+    max-height: calc(100dvh - 160px); grid-template-columns: minmax(0, 1fr); gap: 16px; }
 }
 
 /* ---- dashboard ---- */

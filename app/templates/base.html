@@ -33,7 +33,7 @@
     <form method="get" action="/transactions" class="side-search" role="search">
       {{ icon("search") }}
       <input type="search" name="q" value="{{ filters.q if filters is defined else '' }}" placeholder="Search" aria-label="Search transactions" autocomplete="off">
-      {% if filters is defined %}{% for key, value in filters.items() if key != "q" %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}{% endif %}
+      {% if filter_pairs is defined %}{% for key, value in filter_pairs if key != "q" %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}{% endif %}
     </form>
     <nav aria-label="Main">
       {% for href, label, name in nav %}{{ nav_link(href, label, name) }}{% endfor %}
@@ -47,7 +47,7 @@
             <summary><span class="chev">{{ icon("right") }}</span><span>{{ g.label }}</span><span class="num">{{ g.balance|money }}</span></summary>
             <ul>
               {% for a in g.accounts %}
-                {% set active = filters is defined and filters.account == a.id|string %}
+                {% set active = filters is defined and filters.account == [a.id|string] %}
                 <li><a href="/transactions?account={{ a.id }}"{% if active %} class="active" aria-current="page"{% endif %}
                        title="{{ a.name }}{% if a.mask %} ••{{ a.mask }}{% endif %}{% if a.institution %} at {{ a.institution }}{% endif %}">
                   <span>{{ a.label }}</span><span class="num">{{ a.balance|money }}</span></a></li>

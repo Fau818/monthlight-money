@@ -7,54 +7,136 @@
   <a class="button primary" href="/transactions/new?back={{ here|urlencode }}">{{ icon("plus") }} Add transaction</a>
 </div>
 
-<form method="get" class="toolbar" action="/transactions">
+{# The filters, the sort and the search: one form, applied as soon as something changes (app.js keeps the menu open
+   meanwhile), or with "Show transactions" without JavaScript. #}
+<form method="get" class="toolbar" action="/transactions" data-filters>
   <label class="search">
     {{ icon("search") }}
-    <input type="search" name="q" value="{{ filters.q or '' }}" placeholder="Search names and notes" aria-label="Search names and notes">
+    <input type="search" name="q" value="{{ filters.q }}" placeholder="Search names and notes" aria-label="Search names and notes">
   </label>
   <div class="filters">
-    <select name="month" data-autosubmit aria-label="Month" class="chip-select{% if filters.month %} on{% endif %}">
-      <option value="">All months</option>
-      {% for m in month_options %}<option value="{{ m }}"{% if filters.month == m %} selected{% endif %}>{{ m|month_label }}</option>{% endfor %}
-    </select>
-    <select name="account" data-autosubmit aria-label="Account" class="chip-select{% if filters.account %} on{% endif %}">
-      <option value="">All accounts</option>
-      {% for a in accounts %}<option value="{{ a.id }}"{% if filters.account == a.id|string %} selected{% endif %}>{{ a.name }}{% if a.mask %} ••{{ a.mask }}{% endif %}</option>{% endfor %}
-    </select>
-    <select name="category" data-autosubmit aria-label="Category" class="chip-select{% if filters.category %} on{% endif %}">
-      <option value="">All categories</option>
-      <option value="none"{% if filters.category == "none" %} selected{% endif %}>Uncategorized</option>
-      {% for o in categories %}<option value="{{ o.id }}"{% if filters.category == o.id|string %} selected{% endif %}>{{ o.emoji }} {{ o.label }}</option>{% endfor %}
-    </select>
-    <select name="type" data-autosubmit aria-label="Type" class="chip-select{% if filters.type %} on{% endif %}">
-      <option value="">All types</option>
-      {% for t in ["regular", "income", "transfer"] %}<option value="{{ t }}"{% if filters.type == t %} selected{% endif %}>{{ t|capitalize }}</option>{% endfor %}
-    </select>
-    {% if tag_looks %}
-      <select name="tag" data-autosubmit aria-label="Tag" class="chip-select{% if filters.tag %} on{% endif %}">
-        <option value="">All tags</option>
-        {% for g in tag_looks.values() %}<option value="{{ g.id }}"{% if filters.tag == g.id|string %} selected{% endif %}>{{ g.name }}</option>{% endfor %}
+    <details class="filter-menu" data-filter-menu>
+      <summary class="chip{% if menu_count %} on{% endif %}">{{ icon("filter") }} Filters{% if menu_count %} <b class="count">{{ menu_count }}</b>{% endif %}</summary>
+      <div class="filter-panel">
+        <div class="filter-col">
+          <div class="filter-field">
+            <label class="filter-label" for="filter-period">Dates</label>
+            <select name="period" id="filter-period">
+              <option value="">All time</option>
+              {% for value, label in periods.items() %}<option value="{{ value }}"{% if filters.period == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+              <option value="custom"{% if filters.period == "custom" %} selected{% endif %}>Custom dates…</option>
+              <optgroup label="Months">
+                {% for m in month_options %}<option value="{{ m }}"{% if filters.month == m %} selected{% endif %}>{{ m|month_label }}</option>{% endfor %}
+              </optgroup>
+            </select>
+            <div class="filter-dates">
+              <label>From <input type="date" name="from" value="{{ filters["from"] }}"></label>
+              <label>To <input type="date" name="to" value="{{ filters.to }}"></label>
+            </div>
+          </div>
+          <div class="filter-field">
+            <label class="filter-label" for="filter-amount">Amount</label>
+            {% set choice, first, second = amount_choice %}
+            <div class="filter-amount">
+              <select name="amount_op" id="filter-amount" aria-label="Amount">
+                {% for value, label in amount_choices %}<option value="{{ value }}"{% if choice == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+              </select>
+              <input name="amount_min" value="{{ first }}" inputmode="decimal" placeholder="12.50" aria-label="Amount">
+              <span class="amount-and">and</span>
+              <input name="amount_max" value="{{ second }}" inputmode="decimal" placeholder="20" aria-label="Highest amount">
+            </div>
+            <p class="filter-hint">Money in and out alike.</p>
+          </div>
+          <fieldset class="filter-field">
+            <legend class="filter-label">Type</legend>
+            <div class="filter-choices">
+              {% for value, label in [("regular", "Regular"), ("income", "Income"), ("transfer", "Transfer")] %}
+                <label class="check"><input type="checkbox" name="type" value="{{ value }}"{% if value in filters.type %} checked{% endif %}> {{ label }}</label>
+              {% endfor %}
+            </div>
+          </fieldset>
+          <fieldset class="filter-field">
+            <legend class="filter-label">Review</legend>
+            <div class="filter-choices">
+              {% for value, label in [("", "Any"), ("1", "To review"), ("done", "Reviewed")] %}
+                <label class="check"><input type="radio" name="review" value="{{ value }}"{% if filters.review == value %} checked{% endif %}> {{ label }}</label>
+              {% endfor %}
+            </div>
+          </fieldset>
+          <div class="filter-field">
+            <label class="check"><input type="checkbox" name="transfers" value="1"{% if filters.transfers %} checked{% endif %}> Show moves between your accounts</label>
+          </div>
+        </div>
+        <div class="filter-col">
+          <fieldset class="filter-field">
+            <legend class="filter-label">Accounts</legend>
+            <div class="filter-choices filter-list">
+              {% for a in accounts %}
+                <label class="check"><input type="checkbox" name="account" value="{{ a.id }}"{% if a.id|string in filters.account %} checked{% endif %}> {{ account_labels.get(a.id, a.name) }}</label>
+              {% endfor %}
+            </div>
+          </fieldset>
+          <fieldset class="filter-field">
+            <legend class="filter-label">Categories</legend>
+            <div class="filter-choices filter-list">
+              <label class="check"><input type="checkbox" name="category" value="none"{% if "none" in filters.category %} checked{% endif %}> Uncategorized</label>
+              <label class="check"><input type="checkbox" name="category" value="excluded"{% if "excluded" in filters.category %} checked{% endif %}> 🚫 Excluded</label>
+              {% for o in categories %}
+                <label class="check"><input type="checkbox" name="category" value="{{ o.id }}"{% if o.id|string in filters.category %} checked{% endif %}> {{ o.emoji }} {{ o.label }}</label>
+              {% endfor %}
+            </div>
+          </fieldset>
+          {% if tag_looks %}
+            <fieldset class="filter-field">
+              <legend class="filter-label">Tags</legend>
+              <div class="filter-choices filter-list">
+                {% for g in tag_looks.values() %}
+                  <label class="check"><input type="checkbox" name="tag" value="{{ g.id }}"{% if g.id|string in filters.tag %} checked{% endif %}> <span class="tag tint-{{ g.color }}">{{ g.name }}</span></label>
+                {% endfor %}
+              </div>
+            </fieldset>
+          {% endif %}
+        </div>
+        <div class="filter-actions">
+          <button type="submit" class="primary">Show {{ plural(total, "transaction") }}</button>
+          {% if menu_count %}<a href="{{ clear_link }}">Clear the filters</a>{% endif %}
+        </div>
+      </div>
+    </details>
+    <label class="sort">{{ icon("sort") }}<span class="sr-only">Sort</span>
+      <select name="sort" aria-label="Sort" class="chip-select">
+        <option value="">Newest first</option>
+        <option value="amount"{% if filters.sort == "amount" %} selected{% endif %}>Biggest first</option>
       </select>
-    {% endif %}
-    <input name="amount" value="{{ filters.amount or '' }}" placeholder="Amount: 12.50 or 10-20" inputmode="decimal" data-autosubmit
-           aria-label="Amount, one or a range like 10-20, money in or out" class="chip-input{% if filters.amount %} on{% endif %}">
-    {% if filters.review %}<input type="hidden" name="review" value="1">{% endif %}
-    {% if filters.transfers %}<input type="hidden" name="transfers" value="1">{% endif %}
-    <a class="chip{% if filters.review %} on{% endif %}" href="{{ all_link if filters.review else review_link }}"{% if filters.review %} aria-current="true"{% endif %}>
+    </label>
+    <a class="chip{% if filters.review == "1" %} on{% endif %}" href="{{ all_link if filters.review == "1" else review_link }}"{% if filters.review == "1" %} aria-current="true"{% endif %}>
       To review{% if review_count %} <b class="count">{{ review_count }}</b>{% endif %}</a>
     <a class="chip{% if selecting %} on{% endif %}" href="{{ done_link if selecting else select_link }}"{% if selecting %} aria-current="true"{% endif %}>{{ icon("check") }} {{ "Done selecting" if selecting else "Select" }}</a>
-    {% if filters.select %}<input type="hidden" name="select" value="1">{% endif %}
+    {% if selecting %}<input type="hidden" name="select" value="1">{% endif %}
     <button type="submit" class="js-hide">Filter</button>
-    {% if filters %}<a class="chip clear" href="/transactions">Clear</a>{% endif %}
   </div>
+  {% if chips %}
+    <div class="active-filters">
+      {% for c in chips %}<a class="chip on" href="{{ c.remove }}" title="Stop filtering by this">{{ c.label }} {{ icon("close") }}<span class="sr-only">(remove)</span></a>{% endfor %}
+      {% if chips|length > 1 %}<a class="chip clear" href="{{ clear_link }}">Clear all</a>{% endif %}
+    </div>
+  {% endif %}
 </form>
 
 <div class="list-summary">
   {% if amount_unreadable %}<span class="over-text">Couldn't read “{{ filters.amount }}” as an amount: try 12.50, 10-20, &gt;100 or &lt;50.</span>{% endif %}
-  <span>{{ plural(total, "transaction") }}{% if total %} · {{ sums.out|money }} out · {{ sums["in"]|amount }} in{% endif %}</span>
+  <span>{{ plural(total, "transaction") }}</span>
+  {% if total %}
+    <dl class="list-totals">
+      <div><dt>Spent</dt><dd>{{ totals.spent|money }}</dd></div>
+      <div><dt>Income</dt><dd{% if totals.income > 0 %} class="money-in"{% endif %}>{{ totals.income|amount_html }}</dd></div>
+      <div><dt>Net</dt><dd>{{ totals.net|money }}</dd></div>
+      {% if totals.moved %}<div><dt>Moved between accounts</dt><dd>{{ totals.moved|money }}</dd></div>{% endif %}
+    </dl>
+  {% endif %}
   {% if hidden_transfers %}<span>{{ hidden_transfers }} paired transfer{{ "" if hidden_transfers == 1 else "s" }} between your accounts hidden · <a href="{{ show_transfers_link }}">Show</a></span>
   {% elif filters.transfers %}<span><a href="{{ hide_transfers_link }}">Hide transfers</a></span>{% endif %}
-  {% set tag = tag_looks.get(filters.tag|int) if filters.tag else none %}
+  {% set tag = tag_looks.get(filters.tag[0]|int) if filters.tag|length == 1 else none %}
   {% if tag and rows %}
     <form method="post" action="/tags/{{ tag.id }}/remove" data-swap class="inline"
           data-confirm="Take the tag “{{ tag.name }}” off the {{ plural(rows|length, 'transaction') }} listed here?">
@@ -66,9 +148,16 @@
   {{ review_all(rows, here) }}
 </div>
 
-{% if months %}
-  {# A card for each month: its totals, as on the dashboard, when the whole month is listed, then its days. #}
+{% if rows %}
   <div class="months{% if selecting %} selecting{% endif %}">
+  {% if by_amount %}
+    {# Biggest first, in one list: each row with its day, as days don't group them. #}
+    <section class="card list-card">
+      <header class="month-head"><h2>Biggest first</h2></header>
+      <ul class="txns">{% for t in rows %}{{ transaction_row(t, here, categories, selecting, with_day=true) }}{% endfor %}</ul>
+    </section>
+  {% else %}
+    {# A card for each month: its totals, as on the dashboard, when the whole month is listed, then its days. #}
     {% for m in months %}
       <section class="card list-card month" id="m{{ m.month }}">
         <header class="month-head">
@@ -96,6 +185,7 @@
         {% endfor %}
       </section>
     {% endfor %}
+  {% endif %}
   </div>
   {% if selecting %}
     {# The rows' checkboxes belong to this form (their form="bulk"), as the rows hold forms of their own. #}
@@ -130,7 +220,7 @@
     </form>
   {% endif %}
   {# Loaded as the list scrolls near it (app.js); without JavaScript, a link to the list with them. #}
-  {% if older %}<p class="older"><a class="button" href="{{ older }}" data-older>{{ older_month|month_label }} and earlier</a></p>{% endif %}
+  {% if more %}<p class="older"><a class="button" href="{{ more }}" data-older>{{ (older_month|month_label ~ " and earlier") if older_month else "Show more" }}</a></p>{% endif %}
 {% else %}
   <div class="card"><p class="empty">No transactions match.</p></div>
 {% endif %}

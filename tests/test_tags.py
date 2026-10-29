@@ -28,7 +28,7 @@ def test_tags_are_added_on_a_transactions_page_and_shown_in_the_list(client, set
     listing = unescape(client.get("/transactions").text)
     assert f'href="/transactions?tag={trip}"' in listing and ">Road trip</a>" in listing
     tagged = unescape(client.get(f"/transactions?tag={trip}").text)
-    assert "Shell" in tagged and "Trader Joe's" not in tagged and "1 transaction ·" in tagged
+    assert "Shell" in tagged and "Trader Joe's" not in tagged and "1 transaction</span>" in tagged
 
     # The picks on the page are the tags it keeps; a form without them (an older page) leaves the tags alone.
     client.post(f"/transactions/{shell}", data={**save, "tags_shown": "1", "tag_ids": [str(work)]})

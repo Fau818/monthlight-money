@@ -40,8 +40,8 @@ def test_linked_transactions_show_together_and_count_on_their_own_dates(conn):
     # One in another month stays in it, as that's the month it counts in.
     october = add(conn, account, "2026-10-01", -50, "Zelle to landlord")
     links.link(conn, rows(conn, rent, october))
-    assert listed(conn, month="2026-10") == [("2026-10-01", [(october, "")])]
-    assert listed(conn, month="2026-09") == [("2026-09-30", [(lunch, "")]), ("2026-09-29", [(rent, "down"), (rest, "up")])]
+    assert listed(conn, dates=("2026-10-01", "2026-11-01")) == [("2026-10-01", [(october, "")])]
+    assert listed(conn, dates=("2026-09-01", "2026-10-01")) == [("2026-09-30", [(lunch, "")]), ("2026-09-29", [(rent, "down"), (rest, "up")])]
     assert {t["id"]: t["links"] for t in find_transactions(conn)[0]} == {rent: 2, rest: 2, october: 2, lunch: 0}
 
 
@@ -195,7 +195,7 @@ def test_a_split_links_as_a_whole(client, settings):
     assert "Linked 2 transactions." in unescape(response.text)
     assert [r["link_id"] is not None for r in rows(conn, order, plan, lamp, batteries)] == [True, True, False, False]
     # The split's row and the plan are equals, a line joining them past the parts; the plan is listed on the order's day.
-    [day] = [g for g in group_by_day(find_transactions(conn, month="2026-09")[0], date(2026, 10, 14)) if g["date"] == "2026-09-08"]
+    [day] = [g for g in group_by_day(find_transactions(conn, dates=("2026-09-01", "2026-10-01"))[0], date(2026, 10, 14)) if g["date"] == "2026-09-08"]
     drawn = [(t.get("kind"), t["id"], t["joined"], t["chain_up"], t["chain_down"], t["chain_through"]) for t in day["rows"]]
     assert drawn == [("split", order, False, False, True, False), (None, lamp, True, False, False, True),
                      (None, batteries, True, False, False, True), (None, plan, False, True, False, False)]

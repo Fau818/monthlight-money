@@ -269,6 +269,135 @@ def amount_range(text: str) -> tuple[float | None, float | None] | None:
     return low, high
 
 
+# The transaction list's filters, in the order its address holds them (list_filters); those in MANY can hold several.
+LIST_FILTERS = ("q", "month", "period", "from", "to", "account", "category", "type", "tag", "amount", "review", "transfers", "sort")
+MANY = ("account", "category", "type", "tag")
+# The filter menu's spans of time, each of whole months counted from today (period_range); "custom" takes from/to.
+PERIODS = {"this-month": "This month", "last-month": "Last month", "last-3-months": "Last 3 months",
+           "last-12-months": "Last 12 months", "this-year": "This year", "last-year": "Last year"}
+AMOUNT_CHOICES = [("", "Any amount"), ("eq", "Equals"), ("between", "Between"), ("over", "More than"), ("under", "Less than")]
+
+
+def iso_day(text: str | None) -> str:
+    """Returns `text` as a day like 2026-10-14, or "" when it isn't one."""
+    try:
+        return date.fromisoformat((text or "").strip()).isoformat()
+    except ValueError:
+        return ""
+
+
+def period_range(period: str, today: date) -> tuple[str, str]:
+    """Returns the first day of `period` (one of PERIODS) and the day after its last, as ISO dates."""
+    month = reports.current_month(today)
+    if period.endswith("-year"):
+        year = today.year - (period == "last-year")
+        return f"{year}-01-01", f"{year + 1}-01-01"
+    first, last = {"this-month": (0, 0), "last-month": (-1, -1), "last-3-months": (-2, 0), "last-12-months": (-11, 0)}[period]
+    return reports.month_range(reports.shift_month(month, first))[0], reports.month_range(reports.shift_month(month, last))[1]
+
+
+def amount_text(choice: str, first: str, second: str = "") -> str:
+    """Returns what the amount filter holds for the filter menu's `choice` (see AMOUNT_CHOICES) and amounts: "12.50",
+    "10-20", ">100" or "<50"; "" without a choice or an amount."""
+    first, second = first.strip(), second.strip()
+    if choice == "between" and first and second:
+        return f"{first}-{second}"
+    if not first or choice not in ("eq", "between", "over", "under"):
+        return ""
+    return {"over": ">", "under": "<"}.get(choice, "") + first
+
+
+def amount_choice(text: str) -> tuple[str, str, str]:
+    """Returns the filter menu's choice and its one or two amounts (amount_text, the other way) for what the amount
+    filter holds; an amount it can't read stays as it was typed, as "Equals"."""
+    found = amount_range(text) if text else None
+    if not found:
+        return ("eq", text, "") if text else ("", "", "")
+    show = lambda v: f"{v:.2f}".removesuffix(".00")
+    low, high = found
+    if low == high:
+        return "eq", show(low), ""
+    if low is None or high is None:
+        return ("under", show(high), "") if low is None else ("over", show(low), "")
+    return "between", show(low), show(high)
+
+
+def list_filters(query: list[tuple[str, str]]) -> dict:
+    """Returns the transaction list's filters from its address's `query` (name, value pairs), each checked: for each of
+    LIST_FILTERS, a list (MANY) or text, empty when it isn't set or can't be read. The filter menu's amount fields
+    (amount_op and two amounts) make the amount, and its period can hold a month (YYYY-MM)."""
+    last = lambda name: next((v.strip() for k, v in reversed(query) if k == name and v.strip()), "")
+    every = lambda name, ok: list(dict.fromkeys(v.strip() for k, v in query if k == name and ok(v.strip())))
+    period = last("period")
+    month = reports.valid_month(period) or reports.valid_month(last("month")) or ""
+    period = period if period in PERIODS or period == "custom" else ""
+    start, end = iso_day(last("from")), iso_day(last("to"))
+    if any(k == "amount_op" for k, _ in query):
+        amount = amount_text(last("amount_op"), last("amount_min"), last("amount_max"))
+    else:
+        amount = last("amount")
+    return {
+        "q": last("q"), "month": "" if period else month, "period": period,
+        "from": start if period == "custom" else "", "to": end if period == "custom" else "",
+        "account": every("account", str.isdigit),
+        "category": every("category", lambda v: v.isdigit() or v in ("none", "excluded")),
+        "type": every("type", lambda v: v in categorize.TYPES), "tag": every("tag", str.isdigit), "amount": amount,
+        "review": last("review") if last("review") in ("1", "done") else "", "transfers": "1" if last("transfers") == "1" else "",
+        "sort": "amount" if last("sort") == "amount" else "",
+    }
+
+
+def filter_pairs(filters: dict) -> list[tuple[str, str]]:
+    """Returns the filters that are set as the (name, value) pairs of the list's address, in LIST_FILTERS order."""
+    return [(k, v) for k in LIST_FILTERS for v in (filters[k] if k in MANY else [filters[k]]) if v]
+
+
+def list_criteria(filters: dict, today: date) -> dict:
+    """Returns transaction_filter's criteria for the list's `filters` (list_filters)."""
+    if filters["month"]:
+        dates = reports.month_range(filters["month"])
+    elif filters["period"] == "custom":
+        # NOTE: picked, its days aren't typed yet: nothing to leave out until they are
+        after = (date.fromisoformat(filters["to"]) + timedelta(days=1)).isoformat() if filters["to"] else "9999-12-31"
+        dates = (filters["from"] or "0001-01-01", after) if filters["from"] or filters["to"] else None
+    else:
+        dates = period_range(filters["period"], today) if filters["period"] else None
+    return {"dates": dates, "accounts": [int(a) for a in filters["account"]], "categories": filters["category"],
+            "types": filters["type"], "tags": [int(g) for g in filters["tag"]], "q": filters["q"] or None,
+            "amount": amount_range(filters["amount"]) if filters["amount"] else None, "review": filters["review"]}
+
+
+def filter_chips(conn, filters: dict, categories: list[dict], link) -> list[dict]:
+    """Returns the filters that are set as chips: {"label", "remove"} for each, where `remove` is the list's address
+    without it (`link`, the list's address with some filters changed)."""
+    accounts, tag_names = account_labels(conn), {str(g["id"]): g["name"] for g in tags.tag_looks(conn).values()}
+    names = {"none": "Uncategorized", "excluded": "Excluded", **{str(c["id"]): c["label"].split(" › ")[-1] for c in categories}}
+    chips = []
+    if filters["q"]:
+        chips.append({"label": f"“{filters['q']}”", "remove": link(q="")})
+    if filters["month"]:
+        chips.append({"label": month_label(filters["month"]), "remove": link(month="")})
+    elif filters["period"] == "custom" and (filters["from"] or filters["to"]):
+        start, end = (short_date(d) if d else "" for d in (filters["from"], filters["to"]))
+        chips.append({"label": f"{start} – {end}" if start and end else f"From {start}" if start else f"Until {end}",
+                      "remove": link(period="", **{"from": "", "to": ""})})
+    elif filters["period"] in PERIODS:
+        chips.append({"label": PERIODS[filters["period"]], "remove": link(period="")})
+    for key, label in (("account", lambda v: accounts.get(int(v), "An account")), ("category", lambda v: names.get(v, "A category")),
+                       ("tag", lambda v: tag_names.get(v, "A tag")), ("type", str.capitalize)):
+        if filters[key]:
+            chips.append({"label": ", ".join(label(v) for v in filters[key]), "remove": link(**{key: []})})
+    if filters["amount"]:
+        choice, first, second = amount_choice(filters["amount"])
+        amounts = {"eq": f"${first}", "between": f"${first} – ${second}", "over": f"Over ${first}", "under": f"Under ${first}"}
+        chips.append({"label": amounts.get(choice, filters["amount"]), "remove": link(amount="")})
+    if filters["review"] == "done":
+        chips.append({"label": "Reviewed", "remove": link(review="")})
+    if filters["transfers"]:
+        chips.append({"label": "With moves between accounts", "remove": link(transfers="")})
+    return chips
+
+
 def csv_text(value: str | None) -> str:
     """Returns `value` for a cell of the CSV export, "" for none. Text that a spreadsheet would run as a formula
     (it starts with =, +, -, @, a tab or a return) gets a ' in front, so it shows as text."""
@@ -400,54 +529,68 @@ def register_routes(app: FastAPI) -> None:
     # ---- transactions ----
 
     @app.get("/transactions")
-    def transactions(request: Request, month: str = "", account: str = "", category: str = "", type: str = "", tag: str = "",
-                     amount: str = "", q: str = "", review: str = "", transfers: str = "", select: str = "", oldest: str = "",
-                     conn=Depends(get_db)):
-        month = reports.valid_month(month) or ""
-        account = account if account.isdigit() else ""  # a hand-typed URL can hold anything; ignore what isn't an id
-        category = category if category == "none" or category.isdigit() else ""
-        type_ = type if type in categorize.TYPES else None
-        amount = amount.strip()
-        criteria = {"month": month or None, "account": optional_int(account), "category": category or None, "q": q.strip() or None,
-                    "review": review == "1", "tag": int(tag) if tag.isdigit() else None, "amount": amount_range(amount) if amount else None}
+    def transactions(request: Request, conn=Depends(get_db)):
+        """The list, with the filters, the sort and the page's place in the list read from the address (list_filters).
+        An address that holds them otherwise (as the filter menu sends them, say) leads to the one that holds them so."""
+        query = request.query_params
+        filters = list_filters(query.multi_items())
+        place = {k: v for k in ("select", "oldest", "upto") if (v := query.get(k, "").strip())}
+        pairs = filter_pairs(filters) + list(place.items())
+        if sorted(query.multi_items()) != sorted(pairs):
+            return RedirectResponse("/transactions" + (f"?{urlencode(pairs)}" if pairs else ""), status_code=303)
+        today = date.today()
+        criteria = list_criteria(filters, today)
         # Moves between the user's own accounts, with both sides found and linked, are hidden unless asked for. A
         # transfer without its other side shows, since it may be money that went to someone else. The review list
-        # shows every new one once; looking for an amount shows them all, as the other side may be what's looked for.
-        hide = transfers != "1" and type_ is None and not criteria["review"] and not criteria["amount"]
-        # The list goes a few months at a time, newest first, through `oldest` once more were loaded (app.js does that
-        # as it scrolls near the end): whole months, as many as it takes to list PAGE_SIZE transactions or more.
-        months_listed = listed_months(conn, **criteria, type_=type_, hide_transfers=hide)
-        shown = month_chunk(months_listed, months_listed[0][0], reports.valid_month(oldest)) if months_listed and not month else []
-        rest = [m for m, _ in months_listed if shown and m < shown[-1]]
-        older = month_chunk(months_listed, rest[0]) if rest else []
-        between = (reports.month_range(shown[-1])[0], reports.month_range(shown[0])[1]) if shown else None
-        rows, _ = find_transactions(conn, **criteria, between=between, type_=type_, hide_transfers=hide, limit=-1)
+        # shows every new one once; looking for an amount or for transfers shows them all, as the other side may be
+        # what's looked for.
+        hide = not filters["transfers"] and not filters["type"] and filters["review"] != "1" and not criteria["amount"]
+        by_amount = filters["sort"] == "amount"
+        months_listed = listed_months(conn, **criteria, hide_transfers=hide)
+        total = sum(n for _, n in months_listed)
+        older = []
+        if by_amount:
+            # Biggest first, in one list: PAGE_SIZE more each time the list nears its end (app.js), up to `upto`.
+            shown = int(place["upto"]) if place.get("upto", "").isdigit() else PAGE_SIZE
+            rows, _ = find_transactions(conn, **criteria, hide_transfers=hide, by_amount=True, limit=max(shown, PAGE_SIZE))
+            more = "/transactions?" + urlencode(filter_pairs(filters) + [("upto", len(rows) + PAGE_SIZE)]) if total > len(rows) else ""
+            months = []
+        else:
+            # A few months at a time, newest first, through `oldest` once more were loaded (app.js does that as it
+            # scrolls near the end): whole months, as many as it takes to list PAGE_SIZE transactions or more.
+            shown = month_chunk(months_listed, months_listed[0][0], reports.valid_month(place.get("oldest"))) if months_listed else []
+            rest = [m for m, _ in months_listed if shown and m < shown[-1]]
+            older = month_chunk(months_listed, rest[0]) if rest else []
+            between = (reports.month_range(shown[-1])[0], reports.month_range(shown[0])[1]) if shown else None
+            rows, _ = find_transactions(conn, **criteria, between=between, hide_transfers=hide, limit=-1)
+            more = older and "/transactions?" + urlencode(filter_pairs(filters) + [("oldest", older[-1])]) + f"#m{older[0]}"
+            # Each month starts with its totals, as on the dashboard, when the list shows all of it.
+            whole = not any(filters[k] for k in LIST_FILTERS if k not in ("month", "period", "transfers")) and (
+                criteria["dates"] is None or all(day.endswith("-01") for day in criteria["dates"]))
+            budget = reports.budget_total(reports.category_spending(conn, reports.current_month(today))) if whole else 0
+            months = [dict(m, totals=reports.month_totals(conn, m["month"]) if whole else None, budget=budget,
+                           current=m["month"] == reports.current_month(today)) for m in by_month(group_by_day(rows, today))]
         hidden = find_transactions(conn, **criteria, linked_transfers=True, limit=0)[1] if hide else 0
-        filters = {k: v for k, v in {"month": month, "account": account, "category": category, "type": type, "tag": tag,
-                                     "amount": amount, "q": q, "review": review, "transfers": transfers, "select": select}.items() if v}
-        # Each month starts with its totals, as on the dashboard, when the list shows all of it.
-        whole_months = set(filters) <= {"month", "transfers", "select"}
-        today = date.today()
-        budget = reports.budget_total(reports.category_spending(conn, reports.current_month(today))) if whole_months else 0
+        categories = category_options(conn)
 
-        def without(*keys: str) -> str:
-            rest = {k: v for k, v in filters.items() if k not in keys}
-            return "/transactions" + (f"?{urlencode(rest)}" if rest else "")
+        def link(select: bool = bool(place.get("select")), **changes) -> str:
+            """Returns the list's address with these filters changed ("" or [] for none), selecting or not."""
+            pairs = filter_pairs({**filters, **changes}) + ([("select", "1")] if select else [])
+            return "/transactions" + (f"?{urlencode(pairs)}" if pairs else "")
 
+        chips = filter_chips(conn, filters, categories, link)
         return render(
             request, conn, "transactions.html",
-            months=[dict(m, totals=reports.month_totals(conn, m["month"]) if whole_months else None, budget=budget,
-                         current=m["month"] == reports.current_month(today)) for m in by_month(group_by_day(rows, today))],
-            rows=rows, total=sum(n for _, n in months_listed), filters=filters, query=urlencode(filters),
-            older=older and "/transactions?" + urlencode({**filters, "oldest": older[-1]}) + f"#m{older[0]}", older_month=older and older[0],
-            sums=transaction_sums(conn, **criteria, type_=type_, hide_transfers=hide),
-            amount_unreadable=bool(amount) and criteria["amount"] is None,
-            categories=category_options(conn), hidden_transfers=hidden,
-            show_transfers_link="/transactions?" + urlencode({**filters, "transfers": "1"}),
-            hide_transfers_link=without("transfers"),
-            review_link="/transactions?" + urlencode({**filters, "review": "1"}), all_link=without("review"),
-            selecting=select == "1", select_link="/transactions?" + urlencode({**filters, "select": "1"}), done_link=without("select"),
-            accounts=conn.execute("SELECT id, name, mask FROM accounts ORDER BY name").fetchall(),
+            months=months, rows=rows, by_amount=by_amount, total=total, filters=filters, filter_pairs=filter_pairs(filters),
+            chips=chips, menu_count=len(chips) - bool(filters["q"]) + (filters["review"] == "1"),  # the menu's filters in use
+            clear_link=link(**{k: [] if k in MANY else "" for k in LIST_FILTERS if k != "sort"}),
+            more=more, older_month=older and older[0], totals=listed_totals(conn, **criteria, hide_transfers=hide),
+            amount_unreadable=bool(filters["amount"]) and criteria["amount"] is None, amount_choice=amount_choice(filters["amount"]),
+            periods=PERIODS, amount_choices=AMOUNT_CHOICES, categories=categories, hidden_transfers=hidden,
+            show_transfers_link=link(transfers="1"), hide_transfers_link=link(transfers=""),
+            review_link=link(review="1"), all_link=link(review=""),
+            selecting=bool(place.get("select")), select_link=link(select=True), done_link=link(select=False),
+            accounts=conn.execute("SELECT id, name, mask FROM accounts ORDER BY hidden, archived, name COLLATE NOCASE").fetchall(),
             month_options=[r[0] for r in conn.execute("SELECT DISTINCT substr(date, 1, 7) FROM transactions ORDER BY 1 DESC")],
         )
 
@@ -1484,15 +1627,18 @@ def by_month(days: list[dict]) -> list[dict]:
     return months
 
 
-def find_transactions(conn, *, limit: int = PAGE_SIZE, offset: int = 0, **criteria) -> tuple[list[dict], int]:
+def find_transactions(conn, *, limit: int = PAGE_SIZE, offset: int = 0, by_amount: bool = False, **criteria) -> tuple[list[dict], int]:
     """Returns (transactions matching `criteria`, total number matching); see transaction_filter for the criteria.
     They come newest day first and, within a day, biggest amount first, money in and out alike, then by name; the parts
-    of a split follow one another where the split's total puts them. Each transaction has "tags", its tags from
-    tags.tag_looks, and "links", how many others it's linked with (links.py); a part also has "split_links", how many
-    its split is linked with."""
+    of a split follow one another where the split's total puts them. `by_amount`: biggest amount first, then newest.
+    Each transaction has "tags", its tags from tags.tag_looks, and "links", how many others it's linked with (links.py);
+    a part also has "split_links", how many its split is linked with."""
     clause, params = transaction_filter(**criteria)
     # Not every bank gives the time of day, so a day goes by amount, then name. A split goes as the row for it above its
     # parts (with_split_heads), by its total and name, and its parts follow it by their own amounts.
+    order = ("abs(t.amount) DESC, shown_date DESC, t.name COLLATE NOCASE, t.id DESC" if by_amount else
+             """shown_date DESC, abs(coalesce(sp.amount, t.amount)) DESC, coalesce(sp.name, t.name) COLLATE NOCASE,
+                coalesce(t.split_from_id, t.id) DESC, abs(t.amount) DESC, t.name COLLATE NOCASE, t.id DESC""")
     rows = conn.execute(
         f"""SELECT t.*, a.name AS account_name, a.mask AS account_mask, a.hidden AS account_hidden,
                    c.name AS category_name, c.excluded AS category_excluded, r.name AS recurring_name,
@@ -1512,8 +1658,7 @@ def find_transactions(conn, *, limit: int = PAGE_SIZE, offset: int = 0, **criter
             LEFT JOIN categories c ON c.id = {reports.CATEGORY}
             LEFT JOIN recurring r ON r.id = t.recurring_id
             WHERE {clause}
-            ORDER BY shown_date DESC, abs(coalesce(sp.amount, t.amount)) DESC, coalesce(sp.name, t.name) COLLATE NOCASE,
-                     coalesce(t.split_from_id, t.id) DESC, abs(t.amount) DESC, t.name COLLATE NOCASE, t.id DESC
+            ORDER BY {order}
             LIMIT ? OFFSET ?""",
         params + [limit, offset],
     ).fetchall()
@@ -1524,51 +1669,62 @@ def find_transactions(conn, *, limit: int = PAGE_SIZE, offset: int = 0, **criter
     return [dict(r, tags=[looks_by_id[g] for g in sorted(tagged.get(r["id"], []), key=rank.get)]) for r in rows], total
 
 
-def transaction_sums(conn, **criteria) -> dict:
-    """Returns {"out", "in"}: the money out (as a positive number) and in across every transaction matching
-    `criteria`, as listed, so excluded ones count too."""
+def listed_totals(conn, **criteria) -> dict:
+    """Returns what the transactions matching `criteria` add up to, counted as the dashboard counts them (reports.py):
+    {"spent", "income", "net"}, and "moved", the money that went to the user's other accounts, which counts nowhere."""
     clause, params = transaction_filter(**criteria)
+    counted = "t.excluded = 0 AND coalesce(p.excluded, 0) = 0 AND a.hidden = 0"
     row = conn.execute(
-        f"""SELECT coalesce(-sum(CASE WHEN t.amount < 0 THEN t.amount END), 0) AS money_out,
-                   coalesce(sum(CASE WHEN t.amount > 0 THEN t.amount END), 0) AS money_in
-            FROM {_LISTED} WHERE {clause} AND {reports.NOT_SPLIT}""",
+        f"""SELECT coalesce(-sum(CASE WHEN t.type = 'regular' AND {counted} AND coalesce(c.excluded, 0) = 0 THEN t.amount END), 0) AS spent,
+                   coalesce(sum(CASE WHEN t.type = 'income' AND {counted} THEN t.amount END), 0) AS income,
+                   coalesce(-sum(CASE WHEN t.type = 'transfer' AND t.amount < 0 THEN t.amount END), 0) AS moved
+            FROM {_LISTED} JOIN accounts a ON a.id = t.account_id LEFT JOIN categories c ON c.id = {reports.CATEGORY}
+            WHERE {clause} AND {reports.NOT_SPLIT}""",
         params,
     ).fetchone()
-    return {"out": round(row["money_out"], 2), "in": round(row["money_in"], 2)}
+    spent, income = round(row["spent"], 2), round(row["income"], 2)
+    return {"spent": spent, "income": income, "net": round(income - spent, 2), "moved": round(row["moved"], 2)}
 
 
-def transaction_filter(*, month: str | None = None, between: tuple[str, str] | None = None, account: int | None = None,
-                       category: str | None = None, type_: str | None = None, tag: int | None = None, amount: tuple | None = None,
-                       q: str | None = None, review: bool = False, hide_transfers: bool = False,
-                       linked_transfers: bool = False) -> tuple[str, list]:
+def transaction_filter(*, dates: tuple[str, str] | None = None, between: tuple[str, str] | None = None,
+                       accounts: list[int] = (), categories: list[str] = (), types: list[str] = (), tags: list[int] = (),
+                       amount: tuple | None = None, q: str | None = None, review: str | bool = "",
+                       hide_transfers: bool = False, linked_transfers: bool = False) -> tuple[str, list]:
     """Returns the SQL condition on transactions `t` (with `p` and `ot`, see _LISTED) for these criteria and its parameters.
-    Category "none" means regular transactions waiting for a category: income and transfers don't take one, and
-    excluded ones have none (db.py). A
-    payback goes by its purchase's month and category. `month` and `between` (first day, day after the last) go by the
-    day a transaction is listed on (SHOWN_DAY). `amount` is (lowest, highest) from amount_range, money in and
-    out alike. A transaction split into parts shows only on the review list (`review`), when the parts need a look:
-    otherwise its parts show instead. `hide_transfers` leaves out moves between the user's accounts whose two sides
-    are linked; `linked_transfers` keeps only those."""
+    - `dates` and `between` (first day, day after the last) go by the day a transaction is listed on (SHOWN_DAY)
+    - `accounts`, `categories`, `types` and `tags`: any of them. Category "none" means regular transactions waiting for
+      a category (income and transfers don't take one, and excluded ones have none, db.py); "excluded", the excluded
+      ones. A payback goes by its purchase's category.
+    - `amount` is (lowest, highest) from amount_range, money in and out alike
+    - `review`: "1" (or True) those waiting for review, among them a transaction split into parts whose parts need a
+      look, which shows only then (otherwise its parts show instead); "done" those reviewed
+    - `hide_transfers` leaves out moves between the user's accounts whose two sides are linked; `linked_transfers`
+      keeps only those"""
+    waiting = review is True or review == "1"
     where, params = ["1 = 1"], []
-    if not review:
+    if not waiting:
         where.append(reports.NOT_SPLIT)
-    if tag:
-        where.append("EXISTS (SELECT 1 FROM transaction_tags tt WHERE tt.transaction_id = t.id AND tt.tag_id = ?)")
-        params.append(tag)
-    for start, end in ([reports.month_range(month)] if month else []) + ([between] if between else []):
+    if tags:
+        where.append(f"EXISTS (SELECT 1 FROM transaction_tags tt WHERE tt.transaction_id = t.id AND tt.tag_id IN ({','.join('?' * len(tags))}))")
+        params += list(tags)
+    for start, end in [span for span in (dates, between) if span]:
         where.append(f"{SHOWN_DAY} >= ? AND {SHOWN_DAY} < ?")
         params += [start, end]
-    if account:
-        where.append("t.account_id = ?")
-        params.append(account)
-    if category == "none":
-        where.append(f"{reports.CATEGORY} IS NULL AND t.type = 'regular' AND t.excluded = 0 AND coalesce(p.excluded, 0) = 0")
-    elif category:
-        where.append(f"{reports.CATEGORY} = ?")
-        params.append(optional_int(category))
-    if type_:
-        where.append("t.type = ?")
-        params.append(type_)
+    if accounts:
+        where.append(f"t.account_id IN ({','.join('?' * len(accounts))})")
+        params += list(accounts)
+    if categories:
+        ids = [int(c) for c in categories if c.isdigit()]
+        either = [f"{reports.CATEGORY} IN ({','.join('?' * len(ids))})"] if ids else []
+        params += ids
+        if "none" in categories:
+            either.append(f"({reports.CATEGORY} IS NULL AND t.type = 'regular' AND t.excluded = 0 AND coalesce(p.excluded, 0) = 0)")
+        if "excluded" in categories:
+            either.append("t.excluded = 1")
+        where.append(f"({' OR '.join(either)})")
+    if types:
+        where.append(f"t.type IN ({','.join('?' * len(types))})")
+        params += list(types)
     if amount:
         low, high = amount
         if low is not None:
@@ -1580,8 +1736,10 @@ def transaction_filter(*, month: str | None = None, between: tuple[str, str] | N
     if q:
         where.append("(instr(lower(t.name), ?) > 0 OR instr(lower(coalesce(t.original_name, '')), ?) > 0 OR instr(lower(coalesce(t.notes, '')), ?) > 0)")
         params += [q.lower()] * 3
-    if review:
+    if waiting:
         where.append(f"(t.reviewed = 0 OR {reports.SPLIT_OFF})")
+    elif review == "done":
+        where.append("t.reviewed = 1")
     linked = "(t.type = 'transfer' AND t.transfer_id IS NOT NULL)"
     if hide_transfers:
         where.append(f"NOT {linked}")

@@ -268,6 +268,55 @@ document.addEventListener("submit", async (event) => {
   }
 });
 
+// The list's filters apply as soon as one changes: the list they give takes this one's place, with the filter menu
+// still open where it was, and the address follows. The search waits for Return, and an amount for its numbers.
+function amountReady(form) {
+  const choice = form.elements.amount_op.value;
+  const [first, second] = [form.elements.amount_min.value.trim(), form.elements.amount_max.value.trim()];
+  return !choice || Boolean(choice === "between" ? first && second : first);
+}
+
+document.addEventListener("change", (event) => {
+  const form = event.target.form;
+  if (!form || !form.matches("form[data-filters]") || event.target.name === "q") return;
+  if (event.target.name.startsWith("amount_") && !amountReady(form)) return;
+  form.requestSubmit();
+});
+
+document.addEventListener("submit", async (event) => {
+  const form = event.target;
+  if (event.defaultPrevented || !form.matches("form[data-filters]")) return;
+  event.preventDefault();
+  const menu = form.querySelector("[data-filter-menu]");
+  const stayOpen = menu && menu.open && !(event.submitter && event.submitter.closest(".filter-actions"));  // its button means done
+  const scroll = menu ? menu.querySelector(".filter-panel").scrollTop : 0;
+  const active = form.contains(document.activeElement) ? document.activeElement : null;
+  const url = `${form.getAttribute("action")}?${new URLSearchParams(new FormData(form, event.submitter))}`;
+  try {
+    const { page, url: shown } = await fetchPage(url);
+    swapIn(page, shown);
+  } catch (error) {
+    window.location.assign(url);
+    return;
+  }
+  const again = document.querySelector("[data-filter-menu]");
+  if (!again) return;
+  again.open = stayOpen;
+  again.querySelector(".filter-panel").scrollTop = scroll;
+  const field = active && [...document.querySelectorAll(`form[data-filters] [name="${CSS.escape(active.name)}"]`)]
+    .find((other) => !["checkbox", "radio"].includes(active.type) || other.value === active.value);
+  if (field && (stayOpen || !again.contains(field))) field.focus({ preventScroll: true });
+});
+
+// NOTE: while it goes down the page, so the pane beside the list, which closes on Escape too, stays open
+document.addEventListener("keydown", (event) => {
+  const menu = document.querySelector("[data-filter-menu][open]");
+  if (event.key !== "Escape" || !menu) return;
+  event.preventDefault();
+  menu.open = false;
+  menu.querySelector("summary").focus();
+}, true);
+
 // Earlier months load as the list nears their link: the page that lists them too takes this one's place, keeping the
 // scroll position and what's ticked, and its address, so later changes come back with every month loaded. Without
 // JavaScript the link opens that page.
@@ -353,9 +402,9 @@ document.addEventListener("toggle", (event) => {
   document.cookie = `sidebar_folded=${folded.join(",")}; path=/; max-age=31536000; samesite=lax`;
 }, true);
 
-// Close the phone's More menu when tapping elsewhere.
+// Close the phone's More menu, and the filter menu, when tapping elsewhere.
 document.addEventListener("click", (event) => {
-  for (const menu of document.querySelectorAll("details.more-menu[open]")) {
+  for (const menu of document.querySelectorAll("details.more-menu[open], details.filter-menu[open]")) {
     if (!menu.contains(event.target)) menu.removeAttribute("open");
   }
 });

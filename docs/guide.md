@@ -19,6 +19,15 @@ The app restarts on its own whenever Docker is running. While it runs, it syncs 
 
 The search field at the top of the sidebar looks through names and notes; on **Transactions** it searches within the filters you picked there. Below the pages, the sidebar lists your accounts by group with their balances: click one to see its transactions, or fold a group away. Hidden and archived accounts aren't listed. On a phone, **Transactions** has its own search field.
 
+On **Transactions**, **Filters** opens a field for each filter:
+
+- **Dates:** a span (this month, last month, the last 3 or 12 months, this year or last year), one month, or days of your own.
+- **Amount:** equals, between, more than or less than, money in and out alike.
+- **Type**, **Review**, and whether to show moves between your own accounts.
+- **Accounts**, **Categories** (Uncategorized and Excluded among them) and **Tags**: tick several to see any of them.
+
+The list changes as you pick. The filters in use show as chips under the menu: press one to remove it. **Newest first** turns into **Biggest first**, one list by amount. Above the list, what it adds up to: spent, income and net, counted as the dashboard counts them.
+
 ## Reviewing new transactions
 
 New transactions wait on **Dashboard → To review** and **Transactions → To review**. Pick the right category, or press ✓ if it's already right. When you change a category, the app offers to do the same for every transaction with that name, now and later.

@@ -397,7 +397,9 @@ def test_transactions_are_listed_by_day_with_emoji_categories(client, settings):
     assert "🛒 Food › Groceries" in listing  # the category menu shows each category's emoji
     assert re.search(r'<span class="pill tint-\w+">Groceries</span>', listing)  # and its pill, the category's own name
     assert '<span class="cur">$</span>54.20' in listing  # amounts with a small dollar sign
-    assert "$130.79 out · +$2,520.00 in" in listing  # totals of what's listed, paired transfers left out
+    # What's listed adds up as the dashboard counts it: the refund off the spending, paired transfers left out.
+    assert '<dt>Spent</dt><dd>$110.79</dd>' in listing and '<dt>Net</dt><dd>$2,389.21</dd>' in listing
+    assert '<dt>Income</dt><dd class="money-in">+<span class="cur">$</span>2,500.00</dd>' in listing and "Moved between" not in listing
 
 
 def test_months_are_listed_whole_a_few_at_a_time(monkeypatch):
@@ -533,7 +535,7 @@ def test_income_is_never_excluded(client, settings):
     assert "is excluded from spending" in unescape(client.post(f"/transactions/{shell}/category", data={"category_id": "excluded"}).text)
     assert state() == (1, None)
     assert '<option value="excluded" selected>' in client.get("/transactions?month=2026-10").text
-    assert shell not in [t["id"] for t in find_transactions(conn, category="none")[0]]  # it isn't waiting for a category
+    assert shell not in [t["id"] for t in find_transactions(conn, categories=["none"])[0]]  # it isn't waiting for a category
     client.post(f"/transactions/{shell}/category", data={"category_id": str(shopping)})
     assert state() == (0, shopping)
     client.post(f"/transactions/{shell}", data={"name": "Shell", "type": "regular", "category_id": "excluded", "date": "2026-10-03"})
@@ -672,16 +674,94 @@ def test_amounts_are_read_as_one_or_a_range():
     assert amount_range("lunch") is None and amount_range("nan") is None and amount_range("10-") is None
 
 
+def listed_names(client, **params) -> list[str]:
+    """Returns the names of the transactions the list shows for these filters, in its order."""
+    return re.findall(r'class="txn-name" href="[^"]+">([^<]+)</a>', unescape(client.get("/transactions", params=params).text))
+
+
+def test_the_list_filters_by_several_of_each(client, settings):
+    import_sample(client, settings)
+    conn = sync.connect(settings.db_path)
+    category = lambda name: conn.execute("SELECT id FROM categories WHERE name = ?", (name,)).fetchone()[0]
+    account = lambda name: conn.execute("SELECT id FROM accounts WHERE name = ?", (name,)).fetchone()[0]
+    names = lambda **params: sorted(set(listed_names(client, **params)))
+    assert names(category=[category("Groceries"), category("Gas")]) == ["Shell", "Trader Joe's"]
+    assert names(account=[account("Acme Checking")]) == ["Acme Payroll", "Chase Payment"]
+    assert names(type=["income", "transfer"]) == ["Acme Payroll", "Chase Payment", "Payment Thank You"]
+    shell, amazon = (conn.execute("SELECT id FROM transactions WHERE name = ?", (n,)).fetchone()[0] for n in ("Shell", "Amazon"))
+    client.post(f"/transactions/{shell}/category", data={"category_id": "excluded"})
+    with conn:
+        conn.execute("UPDATE transactions SET reviewed = 0 WHERE id = ?", (amazon,))
+    assert names(category=["excluded"]) == ["Shell"] and names(category=["none"]) == []  # excluded isn't waiting for a category
+    assert names(review="1") == ["Amazon"] and "Amazon" not in names(review="done") and "Shell" in names(review="done")
+    # Excluded, it's still listed, but it counts nowhere.
+    text = unescape(client.get("/transactions", params={"category": "excluded"}).text)
+    assert "1 transaction</span>" in text and "<dt>Spent</dt><dd>$0.00</dd>" in text
+    conn.close()
+
+
+def test_dates_come_as_spans_or_days_of_your_own(client, settings):
+    import_sample(client, settings)  # today is 2026-10-14 (conftest)
+    count = lambda **params: unescape(client.get("/transactions", params=params).text)
+    assert listed_names(client, period="this-month") == ["Shell"]
+    assert "9 transactions</span>" in count(period="last-3-months")  # August to October: July's Netflix is left out
+    assert "10 transactions</span>" in count(period="this-year") and "No transactions match." in count(period="last-year")
+    assert sorted(set(listed_names(client, period="custom", **{"from": "2026-09-08", "to": "2026-09-15"}))) == ["Acme Payroll", "Trader Joe's"]
+    assert "Sep 8 – Sep 15" in count(period="custom", **{"from": "2026-09-08", "to": "2026-09-15"})  # its chip
+    assert "No transactions match." not in count(period="custom")  # picked, before its days are typed
+
+
+def test_filter_addresses_are_tidied(client):
+    tidy = lambda query: client.get(f"/transactions?{query}", follow_redirects=False)
+    # As the filter menu sends them: empty fields, and the amount as a choice and its numbers.
+    r = tidy("q=&period=&from=&to=&amount_op=over&amount_min=100&amount_max=&account=abc&sort=")
+    assert (r.status_code, r.headers["location"]) == (303, "/transactions?amount=%3E100")
+    assert tidy("amount=%3E100").status_code == 200
+    assert tidy("amount_op=between&amount_min=10&amount_max=20").headers["location"] == "/transactions?amount=10-20"
+    assert tidy("period=2026-09").headers["location"] == "/transactions?month=2026-09"  # a month picked among the dates
+    assert tidy("period=custom&from=2026-09-01&to=soon").headers["location"] == "/transactions?period=custom&from=2026-09-01"
+    assert tidy("from=2026-09-01").headers["location"] == "/transactions"  # days without "Custom dates"
+    assert tidy("category=3&category=3&type=regular&type=other").headers["location"] == "/transactions?category=3&type=regular"
+
+
+def test_the_list_sorts_by_amount(client, settings, monkeypatch):
+    import_sample(client, settings)
+    monkeypatch.setattr("app.main.PAGE_SIZE", 3)
+    text = unescape(client.get("/transactions?sort=amount").text)
+    assert listed_names(client, sort="amount") == ["Acme Payroll", "Chase Payment", "Payment Thank You"]  # biggest first, in and out alike
+    assert "Biggest first</h2>" in text and '<span class="txn-day">Sep 15</span>' in text  # each with its day
+    assert '<a class="button" href="/transactions?sort=amount&amp;upto=6" data-older>Show more</a>' in client.get("/transactions?sort=amount").text
+    assert listed_names(client, sort="amount", upto="6")[3:] == ["Trader Joe's", "Trader Joe's", "Shell"]
+    assert "data-older" not in client.get("/transactions?sort=amount&upto=12").text
+
+
+def test_filters_in_use_show_as_chips_that_remove_them(client, settings):
+    import_sample(client, settings)
+    conn = sync.connect(settings.db_path)
+    groceries, gas = (conn.execute("SELECT id FROM categories WHERE name = ?", (n,)).fetchone()[0] for n in ("Groceries", "Gas"))
+    conn.close()
+    text = unescape(client.get("/transactions", params={"q": "e", "period": "last-3-months", "category": [groceries, gas], "amount": "10-60"}).text)
+    assert 'Filters <b class="count">3</b>' in text  # the search isn't in the menu
+    chips = re.findall(r'<a class="chip on" href="([^"]+)" title="Stop filtering by this">([^<]+)<svg', text)
+    assert [(href, label.strip()) for href, label in chips] == [
+        ("/transactions?period=last-3-months&category=" + f"{groceries}&category={gas}&amount=10-60", "“e”"),
+        (f"/transactions?q=e&category={groceries}&category={gas}&amount=10-60", "Last 3 months"),
+        ("/transactions?q=e&period=last-3-months&amount=10-60", "Groceries, Gas"),
+        (f"/transactions?q=e&period=last-3-months&category={groceries}&category={gas}", "$10 – $60"),
+    ]
+    assert '<a class="chip clear" href="/transactions">Clear all</a>' in text
+
+
 def test_transactions_can_be_found_by_amount(client, settings):
     import_sample(client, settings)
     listed = lambda amount: unescape(client.get("/transactions", params={"amount": amount}).text)
     one = listed("61.10")
-    assert "1 transaction ·" in one and "$61.10" in one and "$54.20" not in one
+    assert "1 transaction</span>" in one and "$61.10" in one and "$54.20" not in one
     range_ = listed("15-20")
-    assert "4 transactions ·" in range_ and "Netflix" in range_ and "Amazon" in range_  # money out and in alike
+    assert "4 transactions</span>" in range_ and "Netflix" in range_ and "Amazon" in range_  # money out and in alike
     moves = listed("500")
     assert "Chase Payment" in moves and "Payment Thank You" in moves  # transfers show when looking for an amount
-    assert "Acme Payroll" in listed(">1000") and "1 transaction ·" in listed(">1000")
+    assert "Acme Payroll" in listed(">1000") and "1 transaction</span>" in listed(">1000")
     assert "Couldn't read “cheap” as an amount" in listed("cheap")
     conn = sync.connect(settings.db_path)
     shell = conn.execute("SELECT id FROM transactions WHERE name = 'Shell'").fetchone()[0]
