@@ -73,7 +73,7 @@ Rent paid in two payments, say: tick them on **Transactions** and press **Link t
 
 ## Changing many at once
 
-1. Tick the transactions: point at a row's badge (or tap it on a phone) and it turns into a checkbox.
+1. Tick the transactions: point at a row and its checkbox shows, to the left of its badge. Shift-click another to tick the ones between. On a phone, press **Select**, then tap the rows.
 2. With two or more ticked, they open together beside the list. On a smaller screen, press **Change them** in the bar at the bottom.
 3. Change them all at once: the category (or **Excluded**), tags, reviewed or not, link or unlink, or combine them into one.
 4. **Clear selection** unticks them.

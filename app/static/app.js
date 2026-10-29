@@ -608,7 +608,18 @@ refreshSplits();
 // at the bottom does.
 const picked = new Set();
 
+let selecting = false;  // on a touch screen, after Select: every row shows its checkbox, and a tap on a row ticks it
+let lastPick = null;  // the value of the checkbox ticked or unticked last, for Shift-clicks
+
 function updatePicks() {
+  const months = document.querySelector(".months");
+  if (months) months.classList.toggle("selecting", selecting);
+  const toggle = document.querySelector("[data-select-toggle]");
+  if (toggle) {
+    toggle.classList.toggle("on", selecting);
+    toggle.setAttribute("aria-pressed", String(selecting));
+    toggle.querySelector("span").textContent = selecting ? "Done" : "Select";
+  }
   const picks = [...document.querySelectorAll("input.pick")];
   const listed = new Set(picks.map((pick) => pick.value));
   for (const id of [...picked]) if (!listed.has(id)) picked.delete(id);
@@ -673,12 +684,43 @@ document.addEventListener("change", (event) => {
 });
 
 document.addEventListener("click", (event) => {
-  if (event.target.closest && event.target.closest("[data-edit-picks]")) showPicked(true);
-  if (!event.target.closest || !event.target.closest("[data-clear-picks]")) return;
+  if (!event.target.closest) return;
+  if (event.target.closest("[data-edit-picks]")) showPicked(true);
+  // Shift-click: everything between this checkbox and the one clicked before follows it.
+  const pick = event.target.closest("input.pick");
+  if (pick) {
+    const all = [...document.querySelectorAll("input.pick")];
+    const before = all.findIndex((other) => other.value === lastPick);
+    if (event.shiftKey && before !== -1 && all[before] !== pick) {
+      const [from, to] = [before, all.indexOf(pick)].sort((a, b) => a - b);
+      for (const other of all.slice(from, to + 1)) {
+        if (pick.checked) picked.add(other.value);
+        else picked.delete(other.value);
+      }
+    }
+    lastPick = pick.value;
+  }
+  if (event.target.closest("[data-select-toggle]")) {
+    selecting = !selecting;
+    if (!selecting) picked.clear();  // done selecting, as on a phone's own lists
+    updatePicks();
+    if (!selecting && openId === "selected") closeDrawer();
+    return;
+  }
+  // While selecting, a tap on a row ticks it, rather than opening it; its menus and buttons work as ever.
+  const row = selecting && event.target.closest("ul.txns > li.txn");
+  if (row && !event.target.closest("input, select, button, label, .pill-pick")) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    const box = row.querySelector("input.pick, input.pick-group");
+    if (box) box.click();
+    return;
+  }
+  if (!event.target.closest("[data-clear-picks]")) return;
   picked.clear();
   updatePicks();
   if (openId === "selected") closeDrawer();
-});
+}, true);
 updatePicks();
 
 // The keys the list takes (the shortcuts dialog lists them): not while typing, nor with a modifier key, nor while a

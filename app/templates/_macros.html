@@ -95,7 +95,7 @@
                  ("l" ~ t.link_id) if t.links else (("l" ~ t.split_link_id) if t.split_links)]|select|join(" ") %}
   {% set open = "/transactions/" ~ t.id ~ "?back=" ~ here|urlencode %}
   <li class="txn{% if not t.reviewed %} unreviewed{% endif %}{% if t.excluded %} excluded{% endif %}{% if t.reimburses_id %} payback{% endif %}{% if t.type == "transfer" %} transfer{% endif %}{% if t.split_parts %} split{% endif %}{% if t.joined %} joined{% endif %}{% if t.more %} more{% endif %}{% if t.chain_up %} chain-up{% endif %}{% if t.chain_down %} chain-down{% endif %}{% if t.chain_through %} chain-through{% endif %}" id="t{{ t.id }}"{% if link %} data-link="{{ link }}"{% endif %}>
-    {#- Over its badge, which it takes the place of under the pointer and once any is ticked (style.css). #}
+    {#- In the margin before its badge, seen under the pointer or once ticked (style.css). #}
     {% if pick %}<label class="pick-box"><input type="checkbox" class="pick" name="ids" value="{{ t.id }}" form="bulk"{% if t.split_from_id %} data-part-of="{{ t.split_from_id }}"{% endif %}><span class="sr-only">Select {{ t.name }}</span></label>{% endif %}
     {{ badge(look) }}
     <div class="txn-main">

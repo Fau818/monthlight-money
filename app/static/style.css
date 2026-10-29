@@ -325,7 +325,8 @@ label.check input { min-height: 0; }
 .list-totals dd { margin: 0; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
 .list-totals dd.money-in { color: var(--in); }
 /* The list: a card for each month, with its totals on top (main.by_month), then its days. */
-.list-card { padding: 0 20px; }
+.list-card { --pad: 20px; --gutter: 0px; padding: 0 var(--pad) 0 calc(var(--pad) + var(--gutter)); }
+.months .list-card { --gutter: 14px; }  /* room on the left for the rows' checkboxes */
 .month + .month { margin-top: 16px; }
 .month-head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 28px; padding: 16px 0 12px; border-bottom: 1px solid var(--border); }
 .month-head h2 { margin: 0; font-size: 0.8rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink); }
@@ -335,7 +336,8 @@ label.check input { min-height: 0; }
 .month-link { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; font-size: 0.8rem; font-weight: 600; }
 .month-link .icon { width: 14px; height: 14px; }
 .day + .day { border-top: 1px solid var(--border); }
-.day-head { position: sticky; top: var(--sticky-top); z-index: 2; display: flex; justify-content: space-between; margin: 0 -20px; padding: 10px 20px 4px;
+.day-head { position: sticky; top: var(--sticky-top); z-index: 2; display: flex; justify-content: space-between;
+  margin: 0 calc(-1 * var(--pad)) 0 calc(-1 * (var(--pad) + var(--gutter))); padding: 10px var(--pad) 4px calc(var(--pad) + var(--gutter));
   background: var(--surface); font-size: 0.7rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-variant-numeric: tabular-nums; }
 ul.txns, .cat-list, .sub-list, .upcoming, .groups, .rec-list, .acct-list, .conn-list, .cat-manage, .budget-edit, .link-list { list-style: none; margin: 0; padding: 0; }
 /* A row: badge, name with the account and marks beside it, category, amount and the check while it waits for review. */
@@ -380,9 +382,7 @@ ul.txns { container-type: inline-size; }
   .txn-sub { grid-area: sub; }
 }
 @media (max-width: 640px) {
-  .list-card { padding: 0 14px; }
-  .day-head { margin: 0 -14px; padding: 10px 14px 4px; }
-  .txn.selected { box-shadow: -11px 0 0 var(--raised-row), 14px 0 0 var(--raised-row), -14px 0 0 var(--accent-bg); }
+  .list-card { --pad: 14px; }
   .month-link { margin-left: 0; }
   .filters { flex-wrap: nowrap; overflow-x: auto; margin: 0 -16px; padding: 0 16px 2px; scrollbar-width: none; }
   .filters::-webkit-scrollbar { display: none; }
@@ -665,7 +665,8 @@ li.inactive .rec-row, li.inactive .acct-row, li.inactive .cat-row { opacity: 0.5
 .txn.chain-down::after { content: ""; position: absolute; left: 13px; top: calc(50% + 17px); bottom: 0; border-left: 2px solid var(--baseline); pointer-events: none; }
 .txn.joined.chain-through::after { content: ""; position: absolute; left: 13px; top: 50%; bottom: 0; border-left: 2px solid var(--baseline); pointer-events: none; }
 .txn.link-hover { background: var(--accent-wash); }
-.txn.selected { background: var(--raised-row); box-shadow: -17px 0 0 var(--raised-row), 20px 0 0 var(--raised-row), -20px 0 0 var(--accent-bg); }  /* the open one */
+.txn.selected { background: var(--raised-row); box-shadow: calc(3px - var(--pad) - var(--gutter)) 0 0 var(--raised-row), var(--pad) 0 0 var(--raised-row),
+  calc(-1 * (var(--pad) + var(--gutter))) 0 0 var(--accent-bg); }  /* the open one */
 .txn.link-hover.joined::before, .txn.link-hover.joined::after { border-color: var(--accent); }
 .txn.link-hover.chain-up::before, .txn.link-hover.chain-down::after { border-color: var(--accent); }
 .txn.flash { animation: flash 1.6s ease-out; }
@@ -717,13 +718,22 @@ a.tag:hover { text-decoration: none; background: color-mix(in srgb, var(--tint) 
   .split-row + .split-row { padding-top: 8px; border-top: 1px solid var(--border); }
 }
 
-/* Ticking transactions: each row's checkbox lies over its badge, and takes its place under the pointer, once it has the
-   focus, and in every row once one is ticked; on a touch screen, tapping the badge ticks it. */
-.txn > .pick-box { grid-area: icon; z-index: 1; display: grid; place-items: center; width: 28px; height: 28px; cursor: pointer; opacity: 0; }
-.txn > .pick-box input { width: 18px; height: 18px; min-height: 0; margin: 0; cursor: pointer; }
-.txn:hover > .pick-box, .txn > .pick-box:focus-within, .months:has(.pick:checked) .txn > .pick-box { opacity: 1; }
-.txn:hover > .pick-box + .cat-icon, .txn > .pick-box:focus-within + .cat-icon, .months:has(.pick:checked) .txn > .pick-box + .cat-icon { visibility: hidden; }
+/* Ticking transactions, as in Copilot: each row's checkbox waits unseen in the margin to the left of its badge, and
+   shows under the pointer, once it has the focus, and while it's ticked. A touch screen has no pointer to show it:
+   there, Select (app.js) shows them all and makes room for them, and so does a page without JavaScript. */
+.txn > .pick-box { position: absolute; z-index: 1; left: calc((var(--pad) + var(--gutter)) / -2 - 13px); top: calc(50% - 13px);
+  display: grid; place-items: center; width: 26px; height: 26px; cursor: pointer; opacity: 0; }
+.txn > .pick-box input { width: 16px; height: 16px; min-height: 0; margin: 0; cursor: pointer; }
+.txn:hover > .pick-box, .txn > .pick-box:focus-within, .txn > .pick-box:has(:checked) { opacity: 1; }
 .txn:has(> .pick-box :checked) { background: var(--accent-wash); border-radius: 8px; }
+@media (hover: none) {
+  .months:not(.selecting) .list-card { --gutter: 0px; }
+  .months:not(.selecting) .txn > .pick-box { display: none; }
+  .months.selecting .list-card, html:not(.js) .months .list-card { --gutter: 26px; }
+  .months.selecting .txn > .pick-box, html:not(.js) .txn > .pick-box { display: grid; opacity: 1; }
+}
+.select-toggle { display: none; }
+@media (hover: none) { .js .select-toggle { display: inline-flex; } }
 /* The row the keys act on (app.js), while they're in use, when it isn't the one open beside the list. */
 .keys .txn.current:not(.selected) { border-radius: 8px; box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent-text) 55%, transparent); }
 .bulk-bar { position: sticky; bottom: 12px; z-index: 4; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 12px;

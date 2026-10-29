@@ -109,6 +109,7 @@
         <option value="amount"{% if filters.sort == "amount" %} selected{% endif %}>Biggest first</option>
       </select>
     </label>
+    <button type="button" class="chip select-toggle" data-select-toggle aria-pressed="false">{{ icon("check") }} <span>Select</span></button>
     <a class="chip{% if filters.review == "1" %} on{% endif %}" href="{{ all_link if filters.review == "1" else review_link }}"{% if filters.review == "1" %} aria-current="true"{% endif %}>
       To review{% if review_count %} <b class="count">{{ review_count }}</b>{% endif %}</a>
     <button type="submit" class="js-hide">Filter</button>
