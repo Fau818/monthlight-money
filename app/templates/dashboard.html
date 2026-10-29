@@ -3,6 +3,13 @@
 {% block content %}
 {{ month_nav("/", month, prev_month, next_month, this_month) }}
 
+{% if review_offer %}
+  {# In a new month's first days, last month's review (main.month_review). #}
+  <a class="card review-offer" href="/review/{{ review_offer }}">{{ icon("chart") }}
+    <span><strong>{{ review_offer|month_label }} in review</strong><span class="muted">How last month went: spending against your budgets, what changed most, and your net worth.</span></span>
+    {{ icon("right") }}</a>
+{% endif %}
+
 {% if not has_data %}
   <section class="card">
     <h2>Getting started</h2>

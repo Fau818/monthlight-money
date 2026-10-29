@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% from "_macros.html" import badge, line_chart, left_text, icon with context %}
+{% block title %}{{ month|month_label }} in review{% endblock %}
+{# A change from the month before, as an arrow and the amount: for spending, more is drawn as the dashboard draws it. #}
+{% macro moved(c, spending=true) -%}
+  {% if c and c.diff %}<span class="{{ ('over-text' if c.diff > 0 else 'good-text') if spending else '' }}">{{ "↑" if c.diff > 0 else "↓" }} {{ c.diff|abs|money }}{% if c.percent is not none %} ({{ c.percent|abs }}%){% endif %}</span>{% elif c %}<span>No change</span>{% endif %}
+{%- endmacro %}
+{# The series whose spending changed most (main.review_view): this month's, and a bar from the middle, right for more and
+   left for less than the month before. #}
+{% macro changes(rows, kind) %}
+  {% if rows %}
+    <ul class="change-list">
+      {% for e in rows %}
+        <li>
+          {% if kind == "category" %}{{ badge(transaction_look(looks, "regular", e.category_id), "small") }}{% endif %}
+          <span class="change-name">{% if kind == "category" and e.category_id %}<a href="/categories/{{ e.category_id }}?month={{ month }}">{{ e.label }}</a>{% else %}{{ e.label }}{% endif %}
+            <span class="muted small">{{ e.now|money }} · {{ e.then|money }} in {{ before|month_name }}</span></span>
+          <span class="diverge" aria-hidden="true"><span class="{{ 'up' if e.diff > 0 else 'down' }}" style="width: {{ e.share }}%"></span></span>
+          <span class="num change-diff {{ 'over-text' if e.diff > 0 else 'good-text' }}">{{ "+" if e.diff > 0 else "−" }}{{ e.diff|abs|money }}</span>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="empty">Nothing changed from {{ before|month_name }}.</p>
+  {% endif %}
+{% endmacro %}
+{% block content %}
+<p class="eyebrow">Month in review</p>
+<div class="month-nav">
+  <a class="icon-btn" href="/review/{{ previous }}" aria-label="The month before">{{ icon("left") }}</a>
+  <h1><span class="sr-only">Month in review: </span>{{ month|month_label }}</h1>
+  {% if next %}<a class="icon-btn" href="/review/{{ next }}" aria-label="The month after">{{ icon("right") }}</a>{% endif %}
+</div>
+{% if under_way %}<p class="notice">{{ month|month_name }} isn't over yet: this is how it's going so far.</p>{% endif %}
+
+<section class="card review-hero">
+  <div class="label">You spent</div>
+  {% set dollars, cents = now.spent|money_parts %}
+  <div class="hero">{{ dollars }}<span class="cents">{{ cents }}</span></div>
+  <p class="review-lines">
+    {% if budget %}<span>{{ left_text(now.spent, budget, "your " ~ budget|money ~ " budget") }}</span>{% endif %}
+    {% if spent_change and spent_change.diff %}<span>{{ moved(spent_change) }} from {{ before|month_name }}</span>{% endif %}
+    {% if everyday is not none and everyday != now.spent %}<span class="muted">{{ everyday|money }} of it everyday spending</span>{% endif %}
+  </p>
+  <dl class="kpi-grid">
+    <div class="kpi"><dt>Income</dt><dd class="{% if now.income > 0 %}money-in{% endif %}">{{ now.income|money }}</dd>
+      {% if income_change and income_change.diff %}<span class="kpi-change">{{ moved(income_change, spending=false) }} from {{ before|month_name }}</span>{% endif %}</div>
+    <div class="kpi"><dt>Income minus spending</dt><dd class="{% if now.net < 0 %}over-text{% endif %}">{{ now.net|money }}</dd></div>
+    <div class="kpi"><dt>Kept of your income</dt><dd>{{ ("%g%%"|format(now.rate)) if now.rate is not none else "—" }}</dd>
+      {% if then.rate is not none and now.rate is not none %}<span class="kpi-change">{{ "%g%%"|format(then.rate) }} in {{ before|month_name }}</span>{% endif %}</div>
+    <div class="kpi"><dt>Transactions</dt><dd>{{ "{:,}".format(count) }}</dd></div>
+  </dl>
+</section>
+
+<div class="report-lists">
+  <section class="card">
+    <div class="card-head"><h2>Categories that changed most</h2><span class="muted small">From {{ before|month_name }}</span></div>
+    {{ changes(categories, "category") }}
+  </section>
+  <section class="card">
+    <div class="card-head"><h2>Merchants that changed most</h2><span class="muted small">From {{ before|month_name }}</span></div>
+    {{ changes(merchants, "merchant") }}
+  </section>
+</div>
+
+<div class="report-lists">
+  <section class="card">
+    <div class="card-head"><h2>Biggest expenses</h2><a href="/reports?month={{ month }}">In Reports</a></div>
+    {% if biggest %}
+      <ul class="link-rows big-rows">
+        {% for b in biggest %}
+          <li>
+            {{ badge(transaction_look(looks, "regular", b.category_id), "small") }}
+            <a class="linked" href="/transactions/{{ b.id }}?back={{ here|urlencode }}">
+              <span>{{ b.name }}</span><span class="muted small">{{ b.date|short_date }} · {{ account_labels.get(b.account_id, "") }}{% if b.paid_back %} · {{ b.paid_back|money }} paid back{% endif %}</span>
+              <span class="num">{{ b.amount|amount }}</span></a>
+          </li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="empty">Nothing spent in {{ month|month_name }}.</p>
+    {% endif %}
+  </section>
+  <section class="card">
+    <div class="card-head"><h2>Budgets</h2><a href="/categories?month={{ month }}">Categories</a></div>
+    {% if kept or over %}
+      <p class="review-score"><strong>{{ kept|length }} of {{ (kept + over)|length }}</strong> kept{% if not over %}: every one{% endif %}.</p>
+      {% if over %}
+        <ul class="change-list">
+          {% for n in over %}
+            <li>{{ badge(transaction_look(looks, "regular", n.id), "small") }}
+              <span class="change-name"><a href="/categories/{{ n.id }}?month={{ month }}">{{ n.name }}</a><span class="muted small">{{ n.spent|money }} of {{ n.total_budget|money }}</span></span>
+              <span class="num over-text">{{ (n.spent - n.total_budget)|money }} over</span></li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    {% else %}
+      <p class="empty">No budgets for {{ month|month_name }}. <a href="/categories?month={{ month }}&edit=1">Set some</a></p>
+    {% endif %}
+  </section>
+</div>
+
+<section class="card">
+  <div class="card-head"><h2>Net worth</h2><a href="/accounts">Accounts</a></div>
+  {% if worth_end is not none %}
+    <dl class="kpi-grid">
+      <div class="kpi"><dt>{{ month|month_name }} began at</dt><dd>{{ worth_start|money if worth_start is not none else "—" }}</dd></div>
+      <div class="kpi"><dt>{{ "Now" if under_way else "And ended at" }}</dt><dd>{{ worth_end|money }}</dd></div>
+      {% if worth_start is not none %}<div class="kpi"><dt>Change</dt><dd class="{% if worth_end > worth_start %}money-in{% elif worth_end < worth_start %}over-text{% endif %}">{{ "+" if worth_end > worth_start }}{{ (worth_end - worth_start)|money }}</dd></div>{% endif %}
+    </dl>
+    {% if worth_chart %}{{ line_chart(worth_chart, "Net worth through " ~ (month|month_label), height=120) }}{% endif %}
+  {% else %}
+    <p class="empty">Net worth fills in as your banks sync, day by day.</p>
+  {% endif %}
+</section>
+<p class="review-links"><a href="/transactions?month={{ month }}">{{ month|month_name }}'s transactions</a> · <a href="/?month={{ month }}">On the dashboard</a> · <a href="/reports?month={{ month }}">In Reports</a></p>
+{% endblock %}

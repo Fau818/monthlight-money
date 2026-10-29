@@ -716,11 +716,26 @@ def register_routes(app: FastAPI) -> None:
             months=months_chart(reports.monthly_series(conn, 12, month), month,
                                 reports.monthly_series(conn, 12, month, aside) if everyday_shown else None),
             everyday_shown=everyday_shown, has_everyday=has_everyday, pinned=pinned_reports(conn, today), today=today,
+            review_offer=reports.shift_month(month, -1) if month == reports.current_month(today) and today.day <= 7 else None,
             worth=reports.net_worth(conn), worth_chart=worth_chart(history[-90:]),
             upcoming=recurring.upcoming(conn, 30, today)[:5], review=review, to_review=to_review,
             categories=category_options(conn),
             has_data=conn.execute("SELECT 1 FROM transactions LIMIT 1").fetchone() is not None,
         )
+
+    # ---- a month in review ----
+
+    @app.get("/review")
+    def latest_review():
+        """The review of the month before this one."""
+        return RedirectResponse(f"/review/{reports.shift_month(reports.current_month(date.today()), -1)}", status_code=303)
+
+    @app.get("/review/{month}")
+    def month_review(request: Request, month: str, conn=Depends(get_db)):
+        """A month in review (review_view): how it went, what changed from the month before, and how net worth moved."""
+        if reports.valid_month(month) is None:
+            raise HTTPException(404, "There's no such month.")
+        return render(request, conn, "review.html", **review_view(conn, month, date.today()))
 
     # ---- transactions ----
 
@@ -2464,6 +2479,63 @@ def category_view(conn, cat, month: str, today: date) -> dict:
             "year_spent": round(sum(v for (_, c), v in year.items() if c in family), 2) + 0.0,
             "top_merchants": top, "days": group_by_day(rows, today), "count": count,
             "budget_now": reports.effective_budgets(conn, month).get(cat["id"])}
+
+
+def review_view(conn, month: str, today: date) -> dict:
+    """Returns what a month's review shows:
+    - spent against the budget, income, the share of income kept, and each compared with the month before
+    - the categories and merchants whose spending changed most from the month before, and the biggest expenses
+    - the budgets kept and those gone over, everyday spending when some is set aside, and net worth at the start
+      and end of the month"""
+    before = reports.shift_month(month, -1)
+    (start, end), (p_start, p_end) = reports.month_range(month), reports.month_range(before)
+    now, then = reports.totals(conn, start, end), reports.totals(conn, p_start, p_end)
+    nodes = reports.category_spending(conn, month)
+    groups = reports.category_groups(conn)
+    rows_now, rows_then = reports.counted(conn, start, end), reports.counted(conn, p_start, p_end)
+
+    def changed(group: str) -> list[dict]:
+        """The series of `group` whose spending changed most, biggest change first, with this month's and the last."""
+        totals = {}
+        for when, rows in (("now", rows_now), ("then", rows_then)):
+            for r in rows:
+                for key in reports.keys_of(r, group, groups):
+                    entry = totals.setdefault(key, {"key": key, "now": 0.0, "then": 0.0, "names": Counter()})
+                    entry[when] += r["value"]
+                    entry["names"][" ".join((r["merchant"] or "").split())] += 1
+        out = sorted(({**e, "now": round(e["now"], 2), "then": round(e["then"], 2), "diff": round(e["now"] - e["then"], 2)}
+                      for e in totals.values()), key=lambda e: (-abs(e["diff"]), e["key"]))
+        out = [e for e in out if abs(e["diff"]) >= 0.01][:6]
+        widest = max((abs(e["diff"]) for e in out), default=0) or 1
+        names = dict(conn.execute("SELECT id, name FROM categories").fetchall())
+        for e in out:
+            e["share"] = abs(e["diff"]) / widest * 50  # of the half of the bar on its side
+            if group == "category":
+                e["label"] = names.get(int(e["key"]), "A category") if e["key"].isdigit() else "Uncategorized"
+                e["category_id"] = int(e["key"]) if e["key"].isdigit() else None
+            else:
+                e["label"] = e["names"].most_common(1)[0][0] if e["names"] else e["key"]
+        return out
+
+    budgeted = [n for n in nodes if n["total_budget"]]
+    history = [(day, value) for day, value in reports.net_worth_history(conn) if day < end]
+    worth_start = next((value for day, value in reversed(history) if day < start), None)
+    in_month = [(day, value) for day, value in history if day >= start]
+    worth_end = in_month[-1][1] if in_month else worth_start
+    aside = reports.everyday(conn)
+    everyday = reports.totals(conn, start, end, aside)["spent"] if any(aside[k] for k in reports.LEAVE_OUTS) or aside["over"] else None
+    this_month = reports.current_month(today)
+    return {
+        "month": month, "before": before, "now": now, "then": then, "budget": reports.budget_total(nodes),
+        "spent_change": change(now["spent"], then["spent"]), "income_change": change(now["income"], then["income"]),
+        "categories": changed("category"), "merchants": changed("merchant"),
+        "biggest": reports.biggest(conn, start, end, limit=5),
+        "kept": [n for n in budgeted if n["spent"] <= n["total_budget"]], "over": [n for n in budgeted if n["spent"] > n["total_budget"]],
+        "everyday": everyday, "worth_start": worth_start, "worth_end": worth_end,
+        "worth_chart": worth_chart(([(day, value) for day, value in history if day < start][-1:] + in_month) if in_month else []),
+        "under_way": month == this_month, "previous": before, "next": reports.shift_month(month, 1) if month < this_month else None,
+        "count": len(rows_now),
+    }
 
 
 def column_labels(column: str, first: bool) -> dict:

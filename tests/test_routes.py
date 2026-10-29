@@ -2,12 +2,12 @@ import json
 import logging
 import re
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from html import unescape
 
 from fastapi.testclient import TestClient
 
-from app import reports, sync
+from app import main, reports, sync
 from app.main import bank_details, create_app, find_transactions, month_chunk
 from app.plaid_client import PlaidError
 from tests.conftest import COPILOT_CSV, FakePlaid, page, plaid_account, plaid_txn
@@ -1184,3 +1184,26 @@ def test_rules_and_tags_have_a_page_of_their_own(client, settings):
     assert 'href="/rules"' in page.split('<aside class="sidebar">')[1].split("</aside>")[0]
     response = client.post("/rules", data={"pattern": "shell", "match": "contains", "type": "regular"}, follow_redirects=False)
     assert response.headers["location"] == "/rules#rules"
+
+
+def test_a_month_in_review(client, settings, monkeypatch):
+    import_sample(client, settings)
+    conn = sync.connect(settings.db_path)
+    food = conn.execute("SELECT id FROM categories WHERE name = 'Food'").fetchone()[0]
+    with conn:
+        reports.set_budget(conn, food, "2026-09", 100.0)
+    page = unescape(client.get("/review/2026-09").text)
+    # September: 115.30 of groceries, 15.49 of Netflix and a 20.00 refund; August had Netflix alone.
+    assert "Month in review: </span>September 2026" in page and '$110<span class="cents">.79' in page and "$2,500.00" in page
+    assert "$10.79 over your $100.00 budget" in page and "0 of 1</strong> kept" in page and "$15.30 over" in page  # Food's groceries
+    assert "Categories that changed most" in page and "+$115.30" in page  # Food, from nothing
+    assert "Merchants that changed most" in page and "Trader Joe's" in page and "Biggest expenses" in page
+    assert 'href="/review/2026-08"' in page and 'href="/review/2026-10"' in page
+    assert "isn't over yet" in client.get("/review/2026-10").text and 'href="/review/2026-11"' not in client.get("/review/2026-10").text
+    assert client.get("/review/2026-13").status_code == 404
+    assert client.get("/review", follow_redirects=False).headers["location"] == "/review/2026-09"
+    # In a new month's first days, the dashboard offers last month's review.
+    assert "in review</strong>" not in client.get("/").text  # Oct 14: too late
+    monkeypatch.setattr(main, "date", type("Early", (date,), {"today": classmethod(lambda cls: cls(2026, 11, 3))}))
+    assert "October 2026 in review</strong>" in unescape(client.get("/").text)
+    conn.close()

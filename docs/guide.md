@@ -44,6 +44,10 @@ The app follows your system's light or dark mode. To pick one yourself, press th
 
 Reports count the way the dashboard does: a friend's payback goes with its purchase, a split counts through its parts, and transfers, excluded transactions and hidden accounts count nowhere.
 
+## A month in review
+
+In a new month's first week, the dashboard offers last month's review; any month's is at `/review`, with arrows to the months around it. It shows what you spent against your budgets and earned, how much of your income you kept, the categories and merchants whose spending changed most from the month before, the biggest expenses, which budgets you kept, and how your net worth moved.
+
 ## Everyday spending
 
 A big, rare cost, like a semester's tuition, makes one month's bar tower over the others. Set it aside to see what you spend from day to day: it still counts everywhere, but apart.
