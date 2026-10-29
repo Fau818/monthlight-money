@@ -5,8 +5,8 @@ Steps:
 2. Add 14 months of transactions up to today: bills, a paycheck every other Friday, everyday spending, paired moves
    between accounts, and tuition twice a year.
 3. Add a split, a purchase friends paid back, tags, recurring charges, and daily balances for the net worth chart.
-4. Let one budget roll over and another differ for a month; set the tuition aside from everyday spending, and show it
-   apart on the dashboard.
+4. Let one budget roll over and another differ for a month; set the tuition aside from everyday spending, show it apart
+   on the dashboard, and pin a report of the year's everyday spending there.
 
 Run it with a folder that has no database yet, then point the app at that folder:
 
@@ -154,9 +154,10 @@ def build(folder: Path, today: date | None = None, seed: int = 2) -> Path:
         conn.execute("INSERT INTO budgets (category_id, month, amount) VALUES (?, ?, 400), (?, ?, 250)",
                      (categories["Shopping"], december, categories["Shopping"], f"{int(december[:4]) + 1}-01"))
 
-        # The tuition is set aside from everyday spending, and the dashboard shows it apart.
+        # The tuition is set aside from everyday spending, and the dashboard shows it apart, with a report of the year's.
         db.set_meta(conn, "everyday", json.dumps({"category": [str(categories["Education"])]}))
         db.set_meta(conn, "everyday_shown", "1")
+        conn.execute("INSERT INTO saved_reports (name, query, pinned) VALUES ('Everyday spending this year', 'period=this-year&everyday=1', 1)")
 
         # Balances by day, walked back from today's, for the net worth chart.
         for name, kind, _, balance, _ in ACCOUNTS:

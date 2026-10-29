@@ -58,39 +58,29 @@ workspace, in the style of Copilot Money's Mac app.
 - **Keys:** ↑ and ↓ move, Return opens, X ticks, R marks reviewed, C changes the category, / searches, Esc closes,
   and ? lists them.
 
-## v0.2.x: after v0.2.2
+## v0.2.3: reports, budgets and a page for everything
 
-In this order, each step its own release.
+The rest of the v0.2 plans, in one release.
 
-1. **Reports: where the money goes.**
-   - Pick a period: this month, the last 3 or 12 months, year to date, last year, or custom. Totals come by month,
-     quarter or year.
-   - Show spending, income, net and savings rate, grouped by category, merchant, account or tag.
-   - Leave things out for the report only, without changing any transaction: categories, tags, merchants, accounts,
-     single transactions, or anything above an amount. For example, a year's spending without one large category.
-   - Charts:
-     - stacked bars over time
-     - monthly averages
-     - change from the previous period or the same period last year
-     - top merchants and biggest expenses
-   - Click a bar to see its transactions. Save a report and pin it to the dashboard.
-   - It reuses the filter menu.
-2. **The other pages** laid out like the transactions: the dashboard, budgets, recurring, accounts and settings.
-3. **Categories and budgets.**
-   - Budgets move into a Categories page with spending pace and expected recurring charges.
-   - Each category gets its own page: history, average, year to date and top merchants.
-   - Budget rollover, for the categories you pick: what's left of a month's budget, or what went over it, carries into
-     the next month. Budgets that differ by month.
-4. **A month in review.**
-   - A page for each month: what was spent against the budget, income and the savings rate, the categories and
-     merchants that changed most from the month before, the biggest expenses, and how net worth moved.
-   - The dashboard offers last month's review in the first days of a new month.
-5. **A page for each account.**
-   - Its balance over time, its transactions, and for a card, how much of its limit is used.
-   - The sidebar's accounts open their pages.
-6. **A recurring calendar.**
-   - The month's recurring charges and paydays on a calendar.
-   - What's due before the next payday.
+- **Reports:** spending or income over any span (this month, last month, the last 3 or 12 months, this year, last year,
+  one month, or days of your own), by month, quarter or year, and by category, merchant, account or tag.
+  - Totals with the share of income kept and a month's average, compared with the span before and a year earlier.
+  - Stacked bars with a readout and a table, top merchants and the biggest expenses.
+  - Leave things out for one report alone, click a bar for its transactions, and save a report or pin it to the
+    dashboard.
+- **Everyday spending:** set aside big, rare costs, like tuition: categories, tags, merchants, single transactions or
+  anything over an amount. They still count, but the dashboard's months show them apart, and a report can leave them
+  out.
+- **Categories and budgets:** Budgets became Categories, each with its spending pace and the recurring charges still to
+  come, and a page of its own: its last 12 months, its average, the year so far and its top merchants. Budgets can
+  differ by month and roll over what's left or over. The old settings page is now Rules & tags.
+- **A month in review:** what was spent against the budgets, the share of income kept, what changed most from the
+  month before, the biggest expenses and how net worth moved. The dashboard offers it in a new month's first days.
+- **A page for each account:** its balance over time, its transactions, and a card's limit used. The sidebar's
+  accounts open it.
+- **Recurring:** a calendar of charges and paydays, and what's due before the next payday. Charges and accounts open
+  beside their lists, as transactions do.
+- **Light or dark** by choice, from the sidebar or Settings.
 
 ## v0.3: investments, and maybe savings goals
 

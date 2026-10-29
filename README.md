@@ -1,26 +1,81 @@
-# Monthlight
+<p align="center">
+  <img src="app/static/icon.svg" width="88" height="88" alt="Monthlight's icon, a crescent moon on a navy tile">
+</p>
 
-A self-hosted personal finance app. It syncs your bank accounts through Plaid, sorts your spending into categories and
-budgets, and shows where each month's money went. It runs on your own computer, in Docker, and keeps your data there.
-It's inspired by [Copilot Money](https://copilot.money) (and not affiliated with it), and it can import your history from it.
+<h1 align="center">Monthlight</h1>
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dashboard-v0.2.1-dark.png">
-  <img alt="The dashboard: this month's spending against the budget, transactions to review, budgets and upcoming bills" src="docs/images/dashboard-v0.2.1-light.png">
-</picture>
+<p align="center">
+  <strong>Your money, month by month, on your own computer.</strong><br>
+  A self-hosted personal finance app in the spirit of <a href="https://copilot.money">Copilot Money</a>.
+</p>
 
-## Features
+<p align="center">
+  <a href="https://github.com/Fau818/monthlight-money/actions/workflows/tests.yml"><img alt="Tests" src="https://github.com/Fau818/monthlight-money/actions/workflows/tests.yml/badge.svg"></a>
+  <img alt="Python 3.12 or later" src="https://img.shields.io/badge/python-3.12%2B-3776ab">
+  <img alt="Runs in Docker" src="https://img.shields.io/badge/runs_in-Docker-2496ed">
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-6aa7f8"></a>
+</p>
 
-- **Dashboard:** this month's spending day by day next to last month's, budgets, transactions to review, upcoming bills and net worth.
-- **Transactions:** one line each, month by month, with the one you pick open beside the list. A filter menu, several changed at once, keyboard shortcuts, names without the codes banks add, categories picked right in the list, rules, splits, tags, and paybacks from friends.
-- **Budgets and recurring charges**, with what's left this month.
-- **Accounts:** balances, card limits and net worth over time.
-- **Your data stays with you:** one SQLite file, a backup every day, and a CSV export.
+<p align="center">
+  <a href="#getting-started">Get started</a> · <a href="docs/guide.md">User guide</a> · <a href="ROADMAP.md">Roadmap</a>
+</p>
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/transactions-v0.2.2-dark.png">
-  <img alt="Transactions by month and day, with an order split into its parts, and a transaction open beside the list" src="docs/images/transactions-v0.2.2-light.png">
-</picture>
+<img alt="The dashboard in two windows, light mode behind and dark in front: the month's spending day by day against the budget, transactions to review, budgets, and the months' spending with big costs set aside" src="docs/images/dashboard-v0.2.3.png">
+
+Monthlight syncs your bank accounts through Plaid, puts every transaction in its place, and shows where each month's
+money went. It runs in Docker on your own computer and keeps your data there, in one file, backed up every day. It isn't
+affiliated with [Copilot Money](https://copilot.money), and it can import your history from it.
+
+## See where the money goes
+
+- **Reports:** spending or income over any span, by month, quarter or year, and by category, merchant, account or tag,
+  each compared with the span before and the same span a year earlier. Leave things out of one report without changing
+  a transaction, click a bar for its transactions, and save a report or pin it to the dashboard.
+- **Everyday spending:** set aside the big, rare costs, like a semester's tuition, to see what you spend from day to
+  day. They still count, shown apart on each month's bar.
+- **A month in review:** how each month went against your budgets, the categories and merchants that changed most, the
+  biggest expenses, and how your net worth moved.
+
+## Keep every transaction right
+
+- **Transactions:** one line each, month by month, with the one you pick open beside the list. A filter menu, chips for
+  what's filtered, several changed at once, and keyboard shortcuts.
+- **Clean and connected:** names without the codes banks add, rules that learn, splits, tags, linked transactions,
+  paybacks from friends that count with their purchase, and moves between your own accounts that count nowhere.
+
+<img alt="Transactions by month and day, in light mode, with an order split into its parts and one part open beside the list" src="docs/images/transactions-v0.2.3.png">
+
+## Plan the month
+
+- **Categories and budgets:** each category against its budget, with the month's pace and the bills still to come.
+  Budgets can differ by month, and what's left or over can roll into the next.
+- **Recurring:** a calendar of bills and paydays, and what's due before the next payday.
+- **Accounts:** balances as your bank shows them, a page for each account with its balance over time and a card's
+  limit used, and your net worth.
+
+<table>
+  <tr>
+    <td width="50%">
+<img alt="Categories, in light mode: each one's spending against its budget, with a tick for the month's pace" src="docs/images/categories-v0.2.3.png">
+    </td>
+    <td width="50%">
+<img alt="Recurring, in dark mode: a month's calendar of charges and paydays, and the next payday" src="docs/images/recurring-v0.2.3.png">
+    </td>
+  </tr>
+</table>
+
+## On your phone, too
+
+The same app on your phone, laid out for its screen, through a private connection to your computer
+([remote access](docs/remote-access.md)).
+
+<img alt="Four phone screens side by side: the dashboard, transactions, categories and the recurring calendar, in light and dark mode in turn" src="docs/images/phones-v0.2.3.png">
+
+## Yours, and private
+
+- **On your computer:** no cloud service and no account to make. The app listens only on this computer.
+- **Safe:** a copy of your data every day, the last 30 kept, and everything as CSV whenever you want it.
+- **Comfortable:** light or dark as your system has it, or as you pick, on the computer and on your phone.
 
 ## Getting started
 
@@ -76,7 +131,7 @@ The app has no login and listens only on this computer (127.0.0.1), so never ope
 
 ## More
 
-- [User guide](docs/guide.md): reviewing, splits, paybacks, moves between accounts, links, tags and more
+- [User guide](docs/guide.md): reports, budgets, reviewing, splits, paybacks, moves between accounts, links, tags and more
 - [Use it from your phone](docs/remote-access.md), through Tailscale or Surge Ponte
 - [Roadmap](ROADMAP.md)
 
