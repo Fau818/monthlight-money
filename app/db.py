@@ -216,14 +216,23 @@ ADDED_INDEXES = ["CREATE INDEX IF NOT EXISTS ix_transactions_split ON transactio
                     END"""]
 
 
+def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+
+
 def _add_missing_columns(conn: sqlite3.Connection) -> None:
     for table, columns in ADDED_COLUMNS.items():
-        present = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
         for name, declaration, *fill in columns:
-            if name not in present:
-                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {declaration}")
-                for statement in fill:
-                    conn.execute(statement)
+            if name in _columns(conn, table):
+                continue
+            # NOTE: a column goes in with what fills it, committed, or not at all, and once: another connection may
+            # have added it while this one waited for the write lock
+            with conn:
+                conn.execute("BEGIN IMMEDIATE")
+                if name not in _columns(conn, table):
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {declaration}")
+                    for statement in fill:
+                        conn.execute(statement)
     for statement in ADDED_INDEXES:
         conn.execute(statement)
 

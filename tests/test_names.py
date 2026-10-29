@@ -145,7 +145,8 @@ def test_older_databases_learn_which_names_were_changed_by_hand(tmp_path):
                     "VALUES (1, '2026-10-01', -5, ?, 'plaid', ?, ?)", (name, json.dumps(details) if details else None, edited))
     old.commit()
     old.close()
-    conn = connect(path)
+    connect(path).close()  # opened and closed without a commit, as a page does
+    conn = sqlite3.connect(path)
     assert [r[0] for r in conn.execute("SELECT name_edited FROM transactions ORDER BY id")] == [0, 1, 0, 1, 0]
-    assert "rename_to" in {r["name"] for r in conn.execute("PRAGMA table_info(rules)")}
+    assert "rename_to" in {r[1] for r in conn.execute("PRAGMA table_info(rules)")}
     conn.close()
