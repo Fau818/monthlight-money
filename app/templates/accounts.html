@@ -23,46 +23,35 @@
   {% endif %}
 </section>
 
-{# One account: open it to rename, hide or archive it. #}
+{# One account as a row like a transaction's: its initial, its name with its bank and how fresh its balance is, a card's
+   limit used, and its balance as the bank shows it. It opens in the pane (app.js) to see more or change it. #}
 {% macro account_row(a) %}
-  <li{% if a.hidden or a.archived %} class="inactive"{% endif %}>
-    <details class="expand">
-      <summary class="acct-row" title="Rename, hide or archive {{ a.name }}">
-        <span class="acct-icon" aria-hidden="true">{{ (a.institution or a.name)[:1]|upper }}</span>
-        <span class="acct-main">
-          <span class="acct-name"><strong>{{ a.name }}</strong>{% if a.hidden %}<span class="badge">Hidden</span>{% endif %}{% if a.archived %}<span class="badge">Archived</span>{% endif %}</span>
-          <span class="muted small">
-            {{- a.institution or "" }}{% if a.mask %} ••{{ a.mask }}{% endif %}{% if a.institution or a.mask %} · {% endif %}
-            {%- if a.plaid_account_id %}updated {{ a.balance_updated_at|ago }}{% elif a.kept_by_hand %}what's left after its transactions{% else %}not connected to a bank{% endif %}
-          </span>
-        </span>
-        <span class="num">{{ a.balance|money }}</span>{#- as the bank shows it: what's owed on a card, positive #}
-        <span class="chev">{{ icon("right") }}</span>
-      </summary>
-      <div class="expand-body">
-        <form method="post" action="/accounts/{{ a.id }}" class="inline-edit">
-          <input name="name" value="{{ a.name }}" aria-label="Account name">
-          <label class="check small"><input type="checkbox" name="hidden" value="1"{% if a.hidden %} checked{% endif %}> Hide (leave out of totals)</label>
-          <label class="check small"><input type="checkbox" name="archived" value="1"{% if a.archived %} checked{% endif %}> Archive (no longer used: still counted, but not offered for new transactions)</label>
-          <button type="submit">Save</button>
-        </form>
-      </div>
-    </details>
-    {% if a.type == "credit" and a.credit_limit and a.balance is not none %}
-      <div class="utilization">
-        {{ meter(a.balance, a.credit_limit, "blue") }}
-        <span class="muted small">{{ percent(a.balance, a.credit_limit) }}% of the {{ a.credit_limit|money }} limit used</span>
-      </div>
-    {% endif %}
+  <li class="txn acct-line{% if a.hidden or a.archived %} inactive{% endif %}" id="ta{{ a.id }}">
+    <span class="acct-icon" aria-hidden="true">{{ (a.institution or a.name)[:1]|upper }}</span>
+    <div class="txn-main">
+      <a class="txn-name" href="/accounts/{{ a.id }}?back={{ here|urlencode }}">{{ a.name }}</a>
+      <span class="txn-sub">
+        {%- if a.institution or a.mask %}<span>{{ a.institution or "" }}{% if a.mask %} ••{{ a.mask }}{% endif %}</span>{% endif -%}
+        <span>{% if a.plaid_account_id %}updated {{ a.balance_updated_at|ago }}{% elif a.kept_by_hand %}what's left after its transactions{% else %}not connected to a bank{% endif %}</span>
+        {%- if a.hidden %}<span class="badge">Hidden</span>{% endif %}{% if a.archived %}<span class="badge">Archived</span>{% endif -%}
+      </span>
+    </div>
+    <div class="txn-cat">
+      {% if a.type == "credit" and a.credit_limit and a.balance is not none %}
+        <span class="limit-used" title="{{ a.balance|money }} of the {{ a.credit_limit|money }} limit">{{ meter(a.balance, a.credit_limit, "blue") }}<span class="muted small">{{ percent(a.balance, a.credit_limit) }}% used</span></span>
+      {% endif %}
+    </div>
+    <div class="txn-amount">{{ a.balance|money }}</div>{#- as the bank shows it: what's owed on a card, positive #}
+    <div class="txn-review"></div>
   </li>
 {% endmacro %}
 
 {% for g in worth.groups %}
   {% set shown = g.accounts|rejectattr("archived")|list %}
   {% if shown %}
-    <section class="card">
-      <div class="card-head"><h2>{{ g.label }}</h2><strong class="num">{{ g.balance|money }}</strong></div>
-      <ul class="acct-list">{% for a in shown %}{{ account_row(a) }}{% endfor %}</ul>
+    <section class="card list-card">
+      <header class="month-head"><h2>{{ g.label }}</h2><dl class="month-totals"><div><dt>{{ "Owed" if g.kind in ("credit", "loan") else "Balance" }}</dt><dd>{{ g.balance|money }}</dd></div></dl></header>
+      <ul class="txns">{% for a in shown %}{{ account_row(a) }}{% endfor %}</ul>
     </section>
   {% endif %}
 {% else %}
@@ -71,11 +60,10 @@
 
 {% set archived = worth.groups|map(attribute="accounts")|sum(start=[])|selectattr("archived")|list %}
 {% if archived %}
-  <details class="card fold">
-    <summary><h2>Archived ({{ archived|length }})</h2></summary>
-    <p class="muted small">Accounts you no longer use. Their history still counts; they're just not offered when you add a transaction.</p>
-    <ul class="acct-list">{% for a in archived %}{{ account_row(a) }}{% endfor %}</ul>
-  </details>
+  <section class="card list-card">
+    <header class="month-head"><h2>Archived</h2><span class="muted small">No longer used. Their history still counts; they're just not offered when you add a transaction.</span></header>
+    <ul class="txns">{% for a in archived %}{{ account_row(a) }}{% endfor %}</ul>
+  </section>
 {% endif %}
 
 <section class="card">

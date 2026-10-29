@@ -715,7 +715,7 @@ def register_routes(app: FastAPI) -> None:
             nodes=nodes, budget=budget, pace=pace, pace_chart=pace_chart(pace, month, budget),
             months=months_chart(reports.monthly_series(conn, 12, month), month,
                                 reports.monthly_series(conn, 12, month, aside) if everyday_shown else None),
-            everyday_shown=everyday_shown, has_everyday=has_everyday, pinned=pinned_reports(conn, today),
+            everyday_shown=everyday_shown, has_everyday=has_everyday, pinned=pinned_reports(conn, today), today=today,
             worth=reports.net_worth(conn), worth_chart=worth_chart(history[-90:]),
             upcoming=recurring.upcoming(conn, 30, today)[:5], review=review, to_review=to_review,
             categories=category_options(conn),
@@ -1488,34 +1488,61 @@ def register_routes(app: FastAPI) -> None:
             frequencies=list(recurring.FREQUENCIES),
         )
 
+    # Registered before /recurring/{rid}, which would otherwise take "new" for an id.
+    @app.get("/recurring/new")
+    def new_recurring(request: Request, back: str = "/recurring", conn=Depends(get_db)):
+        """Tracking a recurring charge by hand: in the pane (app.js), or on a page of its own."""
+        return render(request, conn, "recurring_new.html", back=safe_back(back, "/recurring"), categories=category_options(conn),
+                      frequencies=list(recurring.FREQUENCIES))
+
+    @app.get("/recurring/{rid}")
+    def recurring_item(request: Request, rid: int, back: str = "/recurring", conn=Depends(get_db)):
+        """A tracked recurring charge, to change: in the pane beside the list (app.js), or on a page of its own. It lists
+        the charges it has matched, newest first."""
+        item = next((r for r in recurring.list_recurring(conn, date.today()) if r["id"] == rid), None)
+        if item is None:
+            raise HTTPException(404, "Recurring charge not found.")
+        charges = conn.execute(f"{_LINK_ROWS} WHERE t.recurring_id = ? ORDER BY t.date DESC, t.id DESC LIMIT 24", (rid,)).fetchall()
+        year_ago = (date.today() - timedelta(days=365)).isoformat()
+        return render(request, conn, "recurring_edit.html", r=item, charges=charges, back=safe_back(back, "/recurring"), today=date.today(),
+                      categories=category_options(conn), frequencies=list(recurring.FREQUENCIES),
+                      year_total=round(-sum(c["amount"] for c in charges if c["date"] >= year_ago), 2))
+
     @app.post("/recurring/track")
     def track_recurring(name: str = Form(...), pattern: str = Form(...), frequency: str = Form("monthly"),
-                        amount: str = Form(""), category_id: str = Form(""), conn=Depends(get_db)):
+                        amount: str = Form(""), category_id: str = Form(""), back: str = Form("/recurring"), open_it: str = Form("", alias="open"),
+                        conn=Depends(get_db)):
+        """Starts tracking a recurring charge, and links the past transactions it matches; with `open`, shows it then."""
+        back = safe_back(back, "/recurring")
         if frequency not in recurring.FREQUENCIES or not pattern.strip():
-            return redirect("/recurring", "Pick a frequency and the text to match.")
+            return redirect(back, "Pick a frequency and the text to match.")
         try:
             typical = optional_money(amount)
         except ValueError:
-            return redirect("/recurring", f"“{amount.strip()}” isn't an amount.")
+            return redirect(back, f"“{amount.strip()}” isn't an amount.")
         with conn:
-            _, linked = recurring.track(conn, name.strip(), pattern, frequency, typical, optional_int(category_id))
-        return redirect("/recurring", f"Tracking {name}. Linked {linked} past transactions.")
+            rid, linked = recurring.track(conn, name.strip(), pattern, frequency, typical, optional_int(category_id))
+        message = f"Tracking {name}. Linked {plural(linked, 'past transaction')}."
+        return redirect(f"/recurring/{rid}?{urlencode({'back': back})}" if open_it else back, message)
 
     @app.post("/recurring/{rid}")
     def save_recurring(rid: int, name: str = Form(...), frequency: str = Form("monthly"), amount: str = Form(""),
-                       category_id: str = Form(""), active: str = Form(""), conn=Depends(get_db)):
+                       category_id: str = Form(""), active: str = Form(""), back: str = Form("/recurring"), quiet: str = Form(""),
+                       conn=Depends(get_db)):
+        """Saves recurring charge `rid`'s fields, as they change in its pane (`quiet`: no message), or with Save."""
+        back = safe_back(back, "/recurring")
         if frequency not in recurring.FREQUENCIES:
-            return redirect("/recurring", "Unknown frequency.")
+            return redirect(back, "Unknown frequency.")
         try:
             typical = optional_money(amount)
         except ValueError:
-            return redirect("/recurring", f"“{amount.strip()}” isn't an amount.")
+            return redirect(back, f"“{amount.strip()}” isn't an amount.")
         with conn:
             conn.execute(
                 "UPDATE recurring SET name = ?, frequency = ?, amount = ?, category_id = ?, active = ? WHERE id = ?",
                 (name.strip(), frequency, typical, optional_int(category_id), int(bool(active)), rid),
             )
-        return redirect("/recurring", "Saved.")
+        return redirect(back, None if quiet else "Saved.")
 
     @app.post("/recurring/{rid}/delete")
     def delete_recurring(rid: int, conn=Depends(get_db)):
@@ -1543,12 +1570,27 @@ def register_routes(app: FastAPI) -> None:
             conn.execute("INSERT INTO accounts (name, type, source) VALUES (?, 'other', 'manual')", (name.strip(),))
         return redirect("/accounts", f"Added “{name.strip()}”. Pick it when you add a transaction.")
 
+    @app.get("/accounts/{aid}")
+    def account_page(request: Request, aid: int, back: str = "/accounts", conn=Depends(get_db)):
+        """An account: its balance as the bank shows it, its latest transactions, and its name and whether it's hidden or
+        archived, to change. In the pane beside the accounts (app.js), or on a page of its own."""
+        account = next((a for g in reports.net_worth(conn)["groups"] for a in g["accounts"] if a["id"] == aid), None)
+        if account is None:
+            raise HTTPException(404, "Account not found.")
+        latest = conn.execute(f"""SELECT t.*, c.name AS category_name FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
+                                   WHERE t.account_id = ? AND {reports.NOT_SPLIT} ORDER BY t.date DESC, t.id DESC LIMIT 8""", (aid,)).fetchall()
+        count = conn.execute(f"SELECT count(*) FROM transactions t WHERE t.account_id = ? AND {reports.NOT_SPLIT}", (aid,)).fetchone()[0]
+        return render(request, conn, "account_edit.html", a=account, latest=latest, count=count, back=safe_back(back, "/accounts"),
+                      item=conn.execute("SELECT * FROM plaid_items WHERE item_id = ?", (account["plaid_item_id"],)).fetchone())
+
     @app.post("/accounts/{aid}")
-    def save_account(aid: int, name: str = Form(...), hidden: str = Form(""), archived: str = Form(""), conn=Depends(get_db)):
+    def save_account(aid: int, name: str = Form(...), hidden: str = Form(""), archived: str = Form(""), back: str = Form("/accounts"),
+                     quiet: str = Form(""), conn=Depends(get_db)):
+        """Saves account `aid`'s name and whether it's hidden or archived, as they change in its pane (`quiet`: no message)."""
         with conn:
             conn.execute("UPDATE accounts SET name = ?, hidden = ?, archived = ? WHERE id = ?",
                          (name.strip() or "Account", int(bool(hidden)), int(bool(archived)), aid))
-        return redirect("/accounts", "Account saved.")
+        return redirect(safe_back(back, "/accounts"), None if quiet else "Account saved.")
 
     @app.post("/plaid/link-token")
     def plaid_link_token(request: Request, payload: dict = Body(default={}), conn=Depends(get_db)):

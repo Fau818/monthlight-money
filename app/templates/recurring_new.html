@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% from "_macros.html" import category_select, icon with context %}
+{% block title %}Track a recurring charge{% endblock %}
+{% block content %}
+<p><a class="back" href="{{ back }}">{{ icon("left") }} Back</a></p>
+<div class="sheet" data-transaction="new-recurring">
+  <header class="sheet-bar"><h2 class="sheet-kind">Recurring charge</h2></header>
+  <section class="sheet-hero">
+    <h1 class="sheet-name">Track a charge</h1>
+    <p class="muted">A bill or a subscription, or a paycheck. Its past transactions are linked to it, and new ones as they come.</p>
+  </section>
+  <form method="post" action="/recurring/track" class="form-list">
+    <input type="hidden" name="back" value="{{ back }}"><input type="hidden" name="open" value="1">
+    <label class="field">Name <input name="name" placeholder="For example, Netflix" required></label>
+    <label class="field">Text in the transaction name <input name="pattern" placeholder="netflix" required></label>
+    <label class="field">Every <select name="frequency">{% for f in frequencies %}<option value="{{ f }}"{% if f == "monthly" %} selected{% endif %}>{{ f|capitalize }}</option>{% endfor %}</select></label>
+    <label class="field">Amount <input name="amount" class="money" placeholder="-15.49, or 2450 for a paycheck" inputmode="decimal"></label>
+    <label class="field">Category {{ category_select("category_id", categories, none, empty="No category") }}</label>
+    <div class="form-actions"><button type="submit" class="primary">Track</button></div>
+  </form>
+</div>
+{% endblock %}

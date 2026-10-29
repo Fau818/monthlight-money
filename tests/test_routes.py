@@ -875,8 +875,8 @@ def test_accounts_can_be_added_archived_or_hidden_and_the_picker_follows(client,
                                            "account": str(gift["id"]), "type": "regular"})
     assert f'<option value="{gift["id"]}" selected>Gift card' in client.get("/transactions/new").text
     # It shows what's left on it after its transactions.
-    row = unescape(client.get("/accounts").text).split("<strong>Gift card</strong>")[1].split("</summary>")[0]
-    assert "what's left after its transactions" in row and '<span class="num">-$5.00</span>' in row
+    row = unescape(client.get("/accounts").text).split(f'id="ta{gift["id"]}"')[1].split("</li>")[0]
+    assert "what's left after its transactions" in row and '<div class="txn-amount">-$5.00</div>' in row
     # Archived, an account's history still counts, but it isn't offered any more; hidden, neither.
     before = reports.month_totals(conn, "2026-09")
     client.post(f"/accounts/{checking}", data={"name": "Acme Checking", "archived": "1"})
@@ -885,7 +885,13 @@ def test_accounts_can_be_added_archived_or_hidden_and_the_picker_follows(client,
     assert "Acme Checking" not in page_text and "Chase Sapphire" not in page_text and "Gift card" in page_text
     assert reports.month_totals(conn, "2026-09")["income"] == before["income"]  # the archived account's paycheck still counts
     accounts_page = unescape(client.get("/accounts").text)
-    assert "Archived (1)" in accounts_page and accounts_page.index("Archived (1)") < accounts_page.index("Acme Checking", accounts_page.index("Archived (1)"))
+    assert accounts_page.index("<h2>Archived</h2>") < accounts_page.index(f'id="ta{checking}"')  # folded away at the end
+    # An account opens with its latest transactions, and saves as its fields change.
+    sheet = unescape(client.get(f"/accounts/{card}").text)
+    assert 'data-transaction="a' in sheet and "Latest transactions" in sheet and f"/transactions?account={card}" in sheet
+    response = client.post(f"/accounts/{card}", data={"name": "Sapphire", "quiet": "1", "back": f"/accounts/{card}"})
+    assert 'value="Sapphire"' in response.text and "Account saved." not in response.text
+    assert client.get("/accounts/999").status_code == 404
     conn.close()
 
 
@@ -1096,3 +1102,26 @@ def test_the_app_can_be_light_or_dark_by_choice(client):
     client.post("/theme", data={"theme": "system"})
     client.cookies.set("theme", "purple")  # anything else is the system's
     assert "data-theme" not in client.get("/").text.split("<head>")[0] and 'value="system" checked' in client.get("/settings").text
+
+
+def test_recurring_charges_open_in_the_pane_and_save_as_they_change(client, settings):
+    import_sample(client, settings)
+    conn = sync.connect(settings.db_path)
+    rid = conn.execute("SELECT id FROM recurring WHERE name = 'Netflix'").fetchone()[0]
+    listing = unescape(client.get("/recurring").text)
+    assert f'href="/recurring/{rid}?back=/recurring"' in listing and 'class="txn-name"' in listing
+    sheet = unescape(client.get(f"/recurring/{rid}").text)
+    assert f'data-transaction="r{rid}"' in sheet and "3 charges" in sheet and "$46.47 in the last 12 months" in sheet
+    form = {"name": "Netflix", "frequency": "monthly", "amount": "-15.49", "category_id": "", "back": f"/recurring/{rid}", "quiet": "1"}
+    response = client.post(f"/recurring/{rid}", data=form)  # unticked: paused
+    assert "Paused" in response.text and "Saved." not in response.text
+    assert conn.execute("SELECT active FROM recurring WHERE id = ?", (rid,)).fetchone()[0] == 0
+    assert client.get("/recurring/999").status_code == 404
+    # Tracked by hand from its own sheet, a charge opens once it's made.
+    assert "Track a charge" in client.get("/recurring/new").text
+    response = client.post("/recurring/track", data={"name": "Gas", "pattern": "Shell", "frequency": "monthly", "amount": "-40",
+                                                     "open": "1", "back": "/recurring"}, follow_redirects=False)
+    gas = conn.execute("SELECT id FROM recurring WHERE name = 'Gas'").fetchone()[0]
+    assert response.headers["location"] == f"/recurring/{gas}?back=%2Frecurring"
+    assert conn.execute("SELECT count(*) FROM transactions WHERE recurring_id = ?", (gas,)).fetchone()[0] == 1
+    conn.close()

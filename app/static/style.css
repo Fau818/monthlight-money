@@ -98,12 +98,12 @@ main { max-width: 1200px; margin: 0 auto; padding: 28px 32px 64px; }
 .theme-switch .icon-btn:hover { color: var(--ink); }
 .theme-switch .icon { width: 18px; height: 18px; }
 /* The button shows the mode it switches to: the moon while it's light, the sun while it's dark. */
-.theme-to-light { display: none; }
-:root[data-theme="dark"] .theme-to-dark { display: none; }
-:root[data-theme="dark"] .theme-to-light { display: inline-grid; }
+.theme-switch .theme-to-light { display: none; }
+:root[data-theme="dark"] .theme-switch .theme-to-dark { display: none; }
+:root[data-theme="dark"] .theme-switch .theme-to-light { display: inline-grid; }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .theme-to-dark { display: none; }
-  :root:not([data-theme="light"]) .theme-to-light { display: inline-grid; }
+  :root:not([data-theme="light"]) .theme-switch .theme-to-dark { display: none; }
+  :root:not([data-theme="light"]) .theme-switch .theme-to-light { display: inline-grid; }
 }
 .brand:hover { text-decoration: none; }
 .logo { flex: none; width: 28px; height: 28px; border-radius: 7px; }
@@ -533,6 +533,18 @@ ul.txns { container-type: inline-size; }
 .report-table td:first-child { white-space: nowrap; }
 .report-table .table-total td { border-top: 1px solid var(--baseline); font-weight: 600; }
 .everyday-form { display: flex; flex-direction: column; gap: 18px; margin-bottom: 16px; }
+
+/* ---- the other pages' rows, laid out like the transactions' (v0.2.4) ---- */
+.txn.inactive > :not(.txn-review) { opacity: 0.55; }
+.rec-due { font-size: 0.85rem; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+@container (max-width: 600px) { .txn-sub > .rec-extra, .rec-due .muted { display: none; } }  /* a narrow list: the essentials */
+.rec-due .muted { font-weight: 400; }
+.txn > .acct-icon { grid-area: icon; width: 28px; height: 28px; border-radius: 8px; font-size: 0.8rem; }
+.limit-used { display: grid; grid-template-columns: 72px auto; align-items: center; gap: 8px; }
+.limit-used .meter { margin: 0; }
+.up-name a { color: var(--ink); }
+.switch > span { font-size: 0.9rem; color: var(--ink-2); }
+.sheet .switch > span { font-size: 0.85rem; }
 .everyday-form .filter-list { max-height: 260px; }
 /* The dashboard's months, with Everyday on: each bar's set-aside part on top of its everyday part, hatched gray. */
 .col .bar .bar-aside { position: absolute; left: 0; right: 0; top: 0; border-radius: 4px 4px 0 0; border-bottom: 2px solid var(--surface);

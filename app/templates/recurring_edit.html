@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% from "_macros.html" import category_select, icon with context %}
+{% block title %}{{ r.name }}{% endblock %}
+{% block content %}
+<p><a class="back" href="{{ back }}">{{ icon("left") }} Back</a></p>
+{# A tracked recurring charge (main.recurring_item): in the pane beside the list, or on its own page. Its fields save as
+   they change (app.js), or with Save without JavaScript. #}
+<div class="sheet" data-transaction="r{{ r.id }}">
+  <header class="sheet-bar">
+    <h2 class="sheet-kind">{{ "Recurring income" if (r.amount or 0) > 0 else "Recurring charge" }}</h2>
+    <div class="sheet-tools">
+      <details class="more-menu sheet-menu">
+        <summary class="icon-btn" aria-label="More actions">{{ icon("more") }}</summary>
+        <div class="menu">
+          <a href="/transactions?q={{ r.pattern|urlencode }}">Find transactions with “{{ r.pattern }}”</a>
+          <form method="post" action="/recurring/{{ r.id }}/delete" data-confirm="Stop tracking {{ r.name }}? Its transactions stay.">
+            <button type="submit" class="danger-text">Stop tracking</button>
+          </form>
+        </div>
+      </details>
+    </div>
+  </header>
+  <form method="post" action="/recurring/{{ r.id }}" data-autosave data-swap>
+    <input type="hidden" name="back" value="{{ here }}"><input type="hidden" name="quiet" value="">
+    <section class="sheet-hero">
+      <p class="sheet-date">{{ icon("calendar") }}
+        {% if not r.active %}Paused{% elif r.late %}<span class="over-text">Late: it was expected {{ r.next_date.isoformat()|day_label }}</span>
+        {% elif r.next_date %}Next {{ r.next_date.isoformat()|day_label }}, {{ r.next_date|days_until(today) }}{% else %}No charge yet{% endif %}</p>
+      <h1 class="sheet-name"><input name="name" value="{{ r.name }}" required aria-label="Name"></h1>
+      <div class="sheet-amount{% if (r.amount or 0) > 0 %} money-in{% endif %}">{{ (r.amount or 0)|amount_html }}</div>
+      <p class="muted small">About {{ r.monthly|money }} a month{% if year_total %} · {{ year_total|abs|money }} in the last 12 months{% endif %}</p>
+    </section>
+    <div class="sheet-fields">
+      <label class="field-row"><span class="field-label">Every</span>
+        <select name="frequency">{% for f in frequencies %}<option value="{{ f }}"{% if f == r.frequency %} selected{% endif %}>{{ f|capitalize }}</option>{% endfor %}</select></label>
+      <label class="field-row"><span class="field-label">Amount</span>
+        <input class="money" name="amount" value="{{ '%.2f'|format(r.amount) if r.amount is not none else '' }}" inputmode="decimal" placeholder="-15.49"></label>
+      <label class="field-row"><span class="field-label">Category</span>{{ category_select("category_id", categories, r.category_id, empty="No category") }}</label>
+      <div class="field-row"><span class="field-label">Expected</span>
+        <label class="switch"><input type="checkbox" name="active" value="1"{% if r.active %} checked{% endif %}><span>{{ "Yes" if r.active else "Paused" }}</span></label></div>
+      <div class="field-row"><span class="field-label">Matches</span><span class="muted small">Names containing “{{ r.pattern }}”, about this amount</span></div>
+    </div>
+    <noscript><p><button type="submit" class="primary">Save</button></p></noscript>
+  </form>
+  <section class="card">
+    <h2>{{ plural(charges|length, "charge") }}{% if charges|length == 24 %} (the last 24){% endif %}</h2>
+    {% if charges %}
+      <ul class="link-rows">
+        {% for c in charges %}
+          <li><a class="linked" href="/transactions/{{ c.id }}?back={{ here|urlencode }}">
+            <span>{{ c.name }}</span><span class="muted small">{{ c.date|short_date }}{% if c.date[:4] != today.year|string %}, {{ c.date[:4] }}{% endif %} · {{ c.account_name }}</span>
+            <span class="num{% if c.amount > 0 %} money-in{% endif %}">{{ c.amount|amount }}</span></a></li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="empty">No transaction matches it yet.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

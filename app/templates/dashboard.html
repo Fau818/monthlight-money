@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import month_nav, meter, left_text, badge, line_chart, transaction_row, review_all, icon with context %}
+{% from "_macros.html" import month_nav, meter, left_text, badge, line_chart, transaction_row, recurring_row, review_all, icon with context %}
 {% block content %}
 {{ month_nav("/", month, prev_month, next_month, this_month) }}
 
@@ -177,15 +177,7 @@
     <section class="card">
       <div class="card-head"><h2>Coming up</h2><a href="/recurring">Recurring</a></div>
       {% if upcoming %}
-        <ul class="upcoming">
-          {% for r in upcoming %}
-            <li>
-              <span class="date-chip"><small>{{ r.next_date.strftime("%b") }}</small>{{ r.next_date.day }}</span>
-              <span class="up-name">{{ r.name }}<span class="muted small">{{ r.next_date|days_until|capitalize }}</span></span>
-              <span class="num{% if (r.amount or 0) > 0 %} money-in{% endif %}">{{ (r.amount or 0)|amount }}</span>
-            </li>
-          {% endfor %}
-        </ul>
+        <ul class="txns">{% for r in upcoming %}{{ recurring_row(r, here, today) }}{% endfor %}</ul>
       {% else %}
         <p class="empty">Nothing tracked is due in the next 30 days.</p>
       {% endif %}

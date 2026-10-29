@@ -271,3 +271,23 @@
     {% endif %}
   </figure>
 {% endmacro %}
+
+{# A recurring charge as a row like a transaction's: its category's badge, its name with how often and when it last came,
+   when it's due next, and its usual amount. It opens in the pane (app.js); `today` dates "in 5 days". #}
+{% macro recurring_row(r, here, today) %}
+  {% set look = transaction_look(looks, "income" if (r.amount or 0) > 0 else "regular", r.category_id) %}
+  <li class="txn{% if not r.active %} inactive{% endif %}" id="tr{{ r.id }}">
+    {{ badge(look) }}
+    <div class="txn-main">
+      <a class="txn-name" href="/recurring/{{ r.id }}?back={{ here|urlencode }}">{{ r.name }}</a>
+      <span class="txn-sub"><span>{{ r.frequency|capitalize }}</span>{% if r.last_date %}<span class="rec-extra">last {{ r.last_date|short_date }}</span>{% endif %}<span class="rec-extra">{{ plural(r.count, "charge") }}</span></span>
+    </div>
+    <div class="txn-cat">
+      {% if not r.active %}<span class="badge">Paused</span>
+      {% elif r.late %}<span class="badge warn">⚠ Late — canceled?</span>
+      {% elif r.next_date %}<span class="rec-due">{{ r.next_date|short_date }}<span class="muted"> · {{ r.next_date|days_until(today) }}</span></span>{% endif %}
+    </div>
+    <div class="txn-amount{% if (r.amount or 0) > 0 %} money-in{% endif %}">{{ (r.amount or 0)|amount_html }}</div>
+    <div class="txn-review"></div>
+  </li>
+{% endmacro %}

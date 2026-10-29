@@ -116,6 +116,10 @@ On **Transactions**, press **?** to see them:
 | / | Search |
 | Esc | Close the menu or the transaction, then untick |
 
+## Recurring charges
+
+**Recurring** lists what you've tracked, what's still to come this month first; each opens beside the list, where you change its name, how often it comes, its usual amount and its category, or pause it, and see the charges it matched. **Track a charge** tracks one by hand, a paycheck too, and **Looks recurring** offers the ones that repeat on a schedule.
+
 ## Tags
 
 On a transaction, type a tag to add it (an existing one or a new one), or press × on one to take it off. Pick a tag above the list to see everything with it, and take it off all of them at once from there. Rename, recolor or delete tags on **Categories & rules**.
@@ -124,7 +128,7 @@ On a transaction, type a tag to add it (an existing one or a new one), or press 
 
 **Transactions → Add transaction** adds a transaction by hand, for cash or an account that isn't connected; only these can be deleted. For a gift card or a store's credit, add an account on **Accounts → Add an account**: refunds that went there and orders it paid for go on it, and the Accounts page shows what's left.
 
-**Archive** an account you don't use any more: its history still counts, but it's no longer offered when you add a transaction.
+**Archive** an account you don't use any more: its history still counts, but it's no longer offered when you add a transaction. Open an account on **Accounts** to rename, hide or archive it, and to see its latest transactions.
 
 ## Your bank connections
 
