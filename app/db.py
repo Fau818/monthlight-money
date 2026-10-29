@@ -52,10 +52,11 @@ CREATE TABLE IF NOT EXISTS categories (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
     parent_id INTEGER REFERENCES categories(id) ON DELETE SET NULL,
-    budget REAL,                          -- monthly budget in dollars, NULL for none
+    budget REAL,                          -- monthly budget in dollars, NULL for none; until a month in budgets says otherwise
     excluded INTEGER NOT NULL DEFAULT 0,  -- left out of spending totals
     emoji TEXT,                           -- picked by the user; NULL means one chosen from the name (looks.py)
-    color TEXT                            -- one of looks.COLORS, or NULL in the same way
+    color TEXT,                           -- one of looks.COLORS, or NULL in the same way
+    rollover_since TEXT                   -- YYYY-MM: from then on, what's left of a month's budget or over it carries on
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_categories_name ON categories(name COLLATE NOCASE);
 
@@ -133,6 +134,14 @@ CREATE TABLE IF NOT EXISTS tags (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_tags_name ON tags(name COLLATE NOCASE);
 
+-- A category's budget from a month on (reports.effective_budgets), until a later month's; NULL means none from then.
+CREATE TABLE IF NOT EXISTS budgets (
+    category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+    month TEXT NOT NULL,                -- YYYY-MM
+    amount REAL,
+    PRIMARY KEY (category_id, month)
+);
+
 CREATE TABLE IF NOT EXISTS saved_reports (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
@@ -159,7 +168,7 @@ NAMES_EDITED_BEFORE = """UPDATE transactions SET name_edited = 1
 # so connect() adds these to older databases, each with the statements that then fill it in, if any.
 ADDED_COLUMNS = {
     "accounts": [("archived", "INTEGER NOT NULL DEFAULT 0")],
-    "categories": [("emoji", "TEXT"), ("color", "TEXT")],
+    "categories": [("emoji", "TEXT"), ("color", "TEXT"), ("rollover_since", "TEXT")],
     "transactions": [("date_edited", "INTEGER NOT NULL DEFAULT 0"),
                      ("reimburses_id", "INTEGER REFERENCES transactions(id) ON DELETE SET NULL"),
                      ("transfer_id", "INTEGER REFERENCES transactions(id) ON DELETE SET NULL"),

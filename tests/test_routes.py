@@ -12,7 +12,7 @@ from app.main import bank_details, create_app, find_transactions, month_chunk
 from app.plaid_client import PlaidError
 from tests.conftest import COPILOT_CSV, FakePlaid, page, plaid_account, plaid_txn
 
-PAGES = ["/", "/transactions", "/reports", "/reports/transactions", "/everyday", "/budgets", "/recurring", "/accounts", "/categories",
+PAGES = ["/", "/transactions", "/reports", "/reports/transactions", "/everyday", "/categories", "/recurring", "/accounts", "/rules",
          "/import", "/settings", "/names"]
 
 
@@ -34,7 +34,7 @@ def import_sample(client, settings):
 def test_import_then_every_page_loads(client, settings):
     response = import_sample(client, settings)
     assert "Imported 10 transactions" in response.text
-    for path in PAGES + ["/?month=2026-09", "/budgets?month=2026-09", "/transactions?month=2026-09&q=netflix&review=1&type=regular"]:
+    for path in PAGES + ["/?month=2026-09", "/categories?month=2026-09", "/transactions?month=2026-09&q=netflix&review=1&type=regular"]:
         assert client.get(path).status_code == 200, path
     assert "Netflix" in client.get("/transactions?q=netflix").text
     assert "Food" in client.get("/?month=2026-09").text
@@ -82,7 +82,7 @@ def test_renaming_a_transaction_offers_to_rename_the_others(client, settings):
     # The rule the import made for the name keeps its category, and renames now too.
     rule = conn.execute("SELECT category_id, rename_to FROM rules WHERE pattern = 'netflix'").fetchone()
     assert tuple(rule) == (category, "Netflix family plan")
-    assert "Netflix family plan" in client.get("/categories").text
+    assert "Netflix family plan" in client.get("/rules").text
     conn.close()
 
 
@@ -147,9 +147,9 @@ def test_edit_transaction_and_budgets(client, settings):
     assert tuple(row) == ("Amazon return", "shoes", 1)
 
     food = conn.execute("SELECT id FROM categories WHERE name = 'Food'").fetchone()[0]
-    response = client.post("/budgets", data={f"budget_{food}": "$1,200", "back": "/budgets?month=2026-09"})
-    assert "Budgets saved" in response.text
-    assert conn.execute("SELECT budget FROM categories WHERE id = ?", (food,)).fetchone()[0] == 1200.0
+    response = client.post("/budgets", data={f"budget_{food}": "$1,200", "month": "2026-09", "back": "/categories?month=2026-09"})
+    assert "Budgets saved from September 2026 on." in response.text
+    assert [reports.effective_budgets(conn, m)[food] for m in ("2026-08", "2026-09", "2026-12")] == [None, 1200.0, 1200.0]
     assert "“lots” isn't a number" in unescape(client.post("/budgets", data={f"budget_{food}": "lots"}).text)
     conn.close()
 
@@ -446,7 +446,7 @@ def test_categories_take_an_emoji_and_a_color(client, settings):
     gas = conn.execute("SELECT id FROM categories WHERE name = 'Gas'").fetchone()[0]
     client.post(f"/categories/{gas}", data={"name": "Gas", "emoji": " ⛽️ ", "color": "aqua"})
     assert tuple(conn.execute("SELECT emoji, color FROM categories WHERE id = ?", (gas,)).fetchone()) == ("⛽️", "aqua")
-    assert "⛽️" in client.get("/categories").text
+    assert "⛽️" in client.get("/categories").text and "⛽️" in client.get(f"/categories/{gas}").text
     client.post(f"/categories/{gas}", data={"name": "Gas", "emoji": "", "color": "plaid"})  # back to automatic
     assert tuple(conn.execute("SELECT emoji, color FROM categories WHERE id = ?", (gas,)).fetchone()) == (None, None)
     conn.close()
@@ -454,9 +454,10 @@ def test_categories_take_an_emoji_and_a_color(client, settings):
 
 def test_budgets_are_edited_on_request(client, settings):
     import_sample(client, settings)
-    assert 'name="budget_' not in client.get("/budgets?month=2026-09").text
-    editing = client.get("/budgets?month=2026-09&edit=1").text
-    assert 'name="budget_' in editing and 'name="back" value="/budgets?month=2026-09"' in editing
+    assert 'name="budget_' not in client.get("/categories?month=2026-09").text
+    editing = client.get("/categories?month=2026-09&edit=1").text
+    assert 'name="budget_' in editing and 'name="back" value="/categories?month=2026-09"' in editing
+    assert client.get("/budgets?month=2026-09", follow_redirects=False).headers["location"] == "/categories?month=2026-09"
 
 
 def test_a_transactions_date_can_be_changed(client, settings):
@@ -933,7 +934,7 @@ def test_the_sidebar_lists_the_accounts_in_use_by_group(client, settings):
     listing = sidebar(f"/transactions?account={checking}&month=2026-09")
     assert f'<a href="/transactions?account={checking}" class="active" aria-current="page"' in listing
     assert f'<input type="hidden" name="month" value="2026-09"><input type="hidden" name="account" value="{checking}">' in listing
-    assert '<input type="hidden"' not in sidebar("/budgets").split('class="side-search"')[1].split("</form>")[0]  # elsewhere it searches everything
+    assert '<input type="hidden"' not in sidebar("/categories").split('class="side-search"')[1].split("</form>")[0]  # elsewhere it searches everything
     # A group stays folded from page to page: app.js keeps the folded ones in a cookie.
     client.cookies.set("sidebar_folded", "credit")
     assert '<details data-group="credit">' in sidebar() and '<details data-group="depository" open>' in sidebar()
@@ -1125,3 +1126,61 @@ def test_recurring_charges_open_in_the_pane_and_save_as_they_change(client, sett
     assert response.headers["location"] == f"/recurring/{gas}?back=%2Frecurring"
     assert conn.execute("SELECT count(*) FROM transactions WHERE recurring_id = ?", (gas,)).fetchone()[0] == 1
     conn.close()
+
+
+def test_categories_show_each_budget_with_its_pace_and_what_is_still_to_come(client, settings):
+    import_sample(client, settings)
+    conn = sync.connect(settings.db_path)
+    gas = conn.execute("SELECT id FROM categories WHERE name = 'Gas'").fetchone()[0]
+    with conn:
+        reports.set_budget(conn, gas, "2026-10", 100.0)
+        conn.execute("INSERT INTO recurring (name, pattern, amount, frequency, category_id) VALUES ('Car wash', 'car wash', -25, 'monthly', ?)", (gas,))
+        rid = conn.execute("SELECT id FROM recurring WHERE name = 'Car wash'").fetchone()[0]
+        account = conn.execute("SELECT id FROM accounts WHERE name = 'Chase Sapphire'").fetchone()[0]
+        conn.execute("INSERT INTO transactions (account_id, date, amount, name, category_id, recurring_id, source) "
+                     "VALUES (?, '2026-09-20', -25, 'Car wash', ?, ?, 'manual')", (account, gas, rid))
+    page = unescape(client.get("/categories?month=2026-10").text)
+    row = page.split(f'href="/categories/{gas}?month=2026-10"')[1].split("</li>")[0]
+    # 40.00 of 100.00 spent by Oct 14, when 14/31 of the month has gone: 45.16 would be on pace.
+    assert "$60.00 left" in row and "under pace" in row and "$25.00 still to come" in row and "$40.00" in row and "/ $100.00" in row
+    assert 'class="pace" style="left: 45.16' in row
+    # Another month shows no pace.
+    assert "pace" not in unescape(client.get("/categories?month=2026-09").text).split("Nothing spent")[0].split("<main")[1].split("txns")[1]
+    conn.close()
+
+
+def test_a_category_has_its_own_page_with_its_budget_and_rollover(client, settings):
+    import_sample(client, settings)
+    conn = sync.connect(settings.db_path)
+    groceries = conn.execute("SELECT id FROM categories WHERE name = 'Groceries'").fetchone()[0]
+    food = conn.execute("SELECT id FROM categories WHERE name = 'Food'").fetchone()[0]
+    page = unescape(client.get(f"/categories/{groceries}?month=2026-09").text)
+    assert "<h1>Groceries</h1>" in page and "In Food" in page and "$115.30" in page and page.count("Trader Joe's") >= 3
+    assert "Top merchants" in page and "2026 so far" in page
+    response = client.post(f"/categories/{groceries}/budget", data={"amount": "100", "month": "2026-09", "rollover": "1"})
+    assert "Budget saved." in response.text
+    assert tuple(conn.execute("SELECT rollover_since FROM categories WHERE id = ?", (groceries,)).fetchone()) == ("2026-09",)
+    # September went 15.30 over its 100.00, so October has 84.70 to spend.
+    october = unescape(client.get(f"/categories/{groceries}?month=2026-10").text)
+    assert "-$15.30 rolled over: $84.70 to spend" in october
+    assert "rolls over" in unescape(client.get("/categories?month=2026-10").text)
+    # The group adds up its subcategories, and a budget for one month alone leaves the next as it was.
+    client.post(f"/categories/{food}/budget", data={"amount": "300", "month": "2026-10", "apply": "month"})
+    assert [reports.effective_budgets(conn, m)[food] for m in ("2026-10", "2026-11")] == [300.0, None]
+    client.post(f"/categories/{groceries}/budget", data={"amount": "100", "month": "2026-10"})  # unticked: no rollover
+    assert conn.execute("SELECT rollover_since FROM categories WHERE id = ?", (groceries,)).fetchone()[0] is None
+    assert "isn't a number" in unescape(client.post(f"/categories/{groceries}/budget", data={"amount": "lots"}).text)
+    assert client.get("/categories/999").status_code == 404
+    # Its settings save back to its page.
+    response = client.post(f"/categories/{groceries}", data={"name": "Groceries", "emoji": "🥕", "back": f"/categories/{groceries}"})
+    assert "Category saved." in unescape(response.text) and "🥕" in response.text
+    conn.close()
+
+
+def test_rules_and_tags_have_a_page_of_their_own(client, settings):
+    import_sample(client, settings)
+    page = unescape(client.get("/rules").text)
+    assert "<h1>Rules & tags</h1>" in page and 'id="tags"' in page and 'id="rules"' in page and 'id="plaid"' in page
+    assert 'href="/rules"' in page.split('<aside class="sidebar">')[1].split("</aside>")[0]
+    response = client.post("/rules", data={"pattern": "shell", "match": "contains", "type": "regular"}, follow_redirects=False)
+    assert response.headers["location"] == "/rules#rules"

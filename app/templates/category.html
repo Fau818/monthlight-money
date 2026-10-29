@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% from "_macros.html" import badge, meter, left_text, transaction_row, split_head, icon with context %}
+{% block title %}{{ cat.name }}{% endblock %}
+{% block content %}
+{# A category's own page (main.category_view): the month against its budget, its last 12 months, its top merchants, the
+   month's transactions, and its settings. #}
+<p><a class="back" href="/categories?month={{ month }}">{{ icon("left") }} Categories</a></p>
+<div class="page-head">
+  <div class="page-title with-badge">
+    {{ badge(look, "large") }}
+    <div>
+      <h1>{{ cat.name }}</h1>
+      <p class="muted">{% if cat.parent_name %}In {{ cat.parent_name }} · {% endif %}{{ month|month_label }}{% if cat.excluded %} · <strong>left out of spending</strong>{% endif %}</p>
+    </div>
+  </div>
+  <div class="month-nav compact">
+    <a class="icon-btn" href="/categories/{{ cat.id }}?month={{ prev_month }}" aria-label="Previous month">{{ icon("left") }}</a>
+    <a class="icon-btn" href="/categories/{{ cat.id }}?month={{ next_month }}" aria-label="Next month">{{ icon("right") }}</a>
+    {% if month != this_month %}<a class="chip" href="/categories/{{ cat.id }}">This month</a>{% endif %}
+  </div>
+</div>
+
+<section class="card report-totals" aria-label="Totals">
+  <dl class="kpi-grid">
+    <div class="kpi"><dt>Spent in {{ month|month_name }}</dt><dd>{{ node.spent|money }}</dd>
+      {% if node.total_budget %}<span class="kpi-change">{{ left_text(node.spent, node.total_budget, node.total_budget|money) }}</span>{% endif %}
+      {% if node.pace and node.spent < node.total_budget - 0.005 %}<span class="kpi-change">{% if node.pace.ahead > 0.5 %}{{ node.pace.ahead|money }} ahead of pace{% elif node.pace.ahead < -0.5 %}{{ (-node.pace.ahead)|money }} under pace{% else %}On pace{% endif %}</span>{% endif %}
+    </div>
+    <div class="kpi"><dt>Budget</dt><dd>{{ node.budget|money if node.budget is not none else "—" }}</dd>
+      {% if node.rollover %}<span class="kpi-change">{% if node.carry %}{{ "+" if node.carry > 0 }}{{ node.carry|money }} rolled over: {{ node.total_budget|money }} to spend{% else %}Rolls over since {{ node.rollover|month_label }}{% endif %}</span>{% endif %}
+      {% if node.expected %}<span class="kpi-change">{{ node.expected|money }} of recurring charges still to come</span>{% endif %}
+    </div>
+    <div class="kpi"><dt>A month, on average</dt><dd>{{ average|money if average is not none else "—" }}</dd>
+      {% if months_counted %}<span class="kpi-change">Over the {{ plural(months_counted, "month") }} before this one</span>{% endif %}</div>
+    <div class="kpi"><dt>{{ month[:4] }} so far</dt><dd>{{ year_spent|money }}</dd><span class="kpi-change">January through {{ month|month_name }}</span></div>
+  </dl>
+</section>
+
+<section class="card">
+  <div class="card-head"><h2>Spending by month</h2></div>
+  {% if not chart.bars|selectattr("spent")|list %}
+    <p class="empty">Nothing spent in {{ cat.name }} in these months.</p>
+  {% else %}
+    <div class="columns-chart tinted tint-{{ look.color }}">
+      <div class="columns-plot">
+        {% for t in chart.ticks %}<div class="gridline" style="top: {{ t.top }}%"><span>{{ t.label }}</span></div>{% endfor %}
+        {% for m in chart.markers %}<div class="marker{% if m.label == 'Average' %} average{% endif %}" style="top: {{ m.top }}%"><span>{{ m.label }} {{ m.value|compact_money }}</span></div>{% endfor %}
+        <div class="columns">
+          {% for b in chart.bars %}
+            <a class="col{% if b.selected %} selected{% endif %}" href="/categories/{{ cat.id }}?month={{ b.month }}" aria-label="{{ b.month|month_label }}: {{ b.spent|money }}">
+              <span class="bar" style="height: {{ b.height }}%"></span>{# NOTE: no label on top, where it would meet the average's; the totals above have it #}
+              <span class="tip" aria-hidden="true"><b>{{ b.spent|money }}</b><br><span class="muted">{{ b.month|month_label }}</span></span>
+            </a>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="col-ticks" aria-hidden="true">{% for b in chart.bars %}<span>{{ b.tick }}{% if b.year %}<small>{{ b.year }}</small>{% endif %}</span>{% endfor %}</div>
+    </div>
+    <details class="chart-table">
+      <summary>Show as a table</summary>
+      <div class="table-scroll">
+        <table class="compact">
+          <thead><tr><th>Month</th><th class="num">Spent</th></tr></thead>
+          <tbody>{% for b in chart.bars|reverse %}<tr><td><a href="/categories/{{ cat.id }}?month={{ b.month }}">{{ b.month|month_label }}</a></td><td class="num">{{ b.spent|money }}</td></tr>{% endfor %}</tbody>
+        </table>
+      </div>
+    </details>
+  {% endif %}
+</section>
+
+<div class="report-lists">
+  <section class="card">
+    <div class="card-head"><h2>Top merchants</h2><span class="muted small">Last 12 months</span></div>
+    {% if top_merchants %}
+      <ul class="bar-list">
+        {% for m in top_merchants %}
+          <li><a class="bar-row" href="/transactions?{{ {'q': m.name, 'category': cat.id}|urlencode }}">
+            <span class="bar-name">{{ m.name }}</span><span class="num">{{ m.total|money }}</span>
+            <span class="bar-track" aria-hidden="true"><span style="width: {{ m.share }}%"></span></span>
+            <span class="muted small">{{ plural(m.count, "transaction") }}</span></a></li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="empty">No spending in it yet.</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Budget</h2>
+    <form method="post" action="/categories/{{ cat.id }}/budget" class="form-list">
+      <input type="hidden" name="month" value="{{ month }}">
+      <label class="field">For {{ month|month_label }}
+        <input class="money" name="amount" value="{{ ('%.2f'|format(budget_now)) if budget_now is not none else '' }}" inputmode="decimal" placeholder="No budget"></label>
+      <div class="segmented">
+        <label><input type="radio" name="apply" value="on" checked><span>And the months after</span></label>
+        <label><input type="radio" name="apply" value="month"><span>{{ month|month_name }} only</span></label>
+      </div>
+      <label class="switch"><input type="checkbox" name="rollover" value="1"{% if cat.rollover_since %} checked{% endif %}>
+        <span>Roll over: what's left of a month's budget, or what went over it, carries into the next month{% if cat.rollover_since %}, since {{ cat.rollover_since|month_label }}{% endif %}</span></label>
+      <div class="form-actions"><button type="submit" class="primary">Save the budget</button></div>
+    </form>
+  </section>
+</div>
+
+<section class="card list-card category-txns">
+  <header class="month-head"><h2>{{ month|month_label }}</h2><span class="muted small">{{ plural(count, "transaction") }}</span>
+    <a class="month-link" href="/transactions?month={{ month }}{% for c in family %}&category={{ c }}{% endfor %}">In Transactions {{ icon("right") }}</a></header>
+  {% for g in days %}
+    <section class="day">
+      <h3 class="day-head"><span>{{ g.label }}</span>{% if g.spent > 0 %}<span>{{ g.spent|money }}</span>{% endif %}</h3>
+      <ul class="txns">{% for t in g.rows %}{% if t.kind == "split" %}{{ split_head(t, here) }}{% else %}{{ transaction_row(t, here, categories) }}{% endif %}{% endfor %}</ul>
+    </section>
+  {% else %}
+    <p class="empty">No transactions in {{ cat.name }} in {{ month|month_name }}.</p>
+  {% endfor %}
+</section>
+
+<section class="card">
+  <h2>Settings</h2>
+  <form method="post" action="/categories/{{ cat.id }}" class="edit-grid">
+    <input type="hidden" name="back" value="{{ here }}">
+    <label>Name <input name="name" value="{{ cat.name }}" required></label>
+    <label>Emoji <input name="emoji" value="{{ cat.emoji or '' }}" placeholder="{{ look.emoji }}" class="emoji-input" maxlength="16" aria-describedby="emoji-help"></label>
+    <fieldset class="swatches">
+      <legend>Color</legend>
+      {% for color in colors %}
+        <label class="swatch tint-{{ color }}" title="{{ color|capitalize }}"><input type="radio" name="color" value="{{ color }}"{% if look.color == color %} checked{% endif %}><span class="sr-only">{{ color|capitalize }}</span></label>
+      {% endfor %}
+    </fieldset>
+    <label>Group
+      <select name="parent_id">
+        <option value="">None (top level)</option>
+        {% for p in top_level %}<option value="{{ p.id }}"{% if p.id == cat.parent_id %} selected{% endif %}>{{ p.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <label class="check"><input type="checkbox" name="excluded" value="1"{% if cat.excluded %} checked{% endif %}> Leave out of spending</label>
+    <div class="form-actions"><button type="submit" class="primary">Save</button></div>
+  </form>
+  <p id="emoji-help" class="muted small">Leave the emoji empty to go back to the one chosen from its name. To pick one, press Control-Command-Space on a Mac, or the Windows key and the period key on Windows.</p>
+  <form method="post" action="/categories/{{ cat.id }}/delete" data-confirm="Delete {{ cat.name }}? Its transactions become uncategorized.">
+    <button type="submit" class="link danger-text">Delete this category</button>
+  </form>
+</section>
+{% endblock %}

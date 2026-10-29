@@ -52,6 +52,16 @@ A big, rare cost, like a semester's tuition, makes one month's bar tower over th
 2. Switch on **Everyday** above the chart: each month's bar shows what was set aside on top, hatched gray, and its readout and table give both parts.
 3. In **Reports**, tick **Leave out what isn't everyday spending** under **Leave out**.
 
+## Categories and budgets
+
+**Categories** shows each category's spending in the month against its budget: what's left or how far over, whether it's ahead of the month's pace (the tick on its bar is how far through the month you are), and the recurring charges still to come, hatched on its bar. A group adds up its subcategories.
+
+1. **Edit budgets** changes the month's budgets, for that month and the ones after, or for that month only (a bigger one for December, say).
+2. Open a category for its own page: its last 12 months, a month on average, the year so far, its top merchants and the month's transactions.
+3. On that page, **Roll over** carries what's left of a month's budget into the next one, and what went over it too, from the month you switch it on. Its emoji, color, group and name are there too.
+
+Rules, tags and how Plaid's categories map to yours are on **Rules & tags**.
+
 ## Reviewing new transactions
 
 New transactions wait on **Dashboard → To review** and **Transactions → To review**. Pick the right category, or press ✓ if it's already right. When you change a category, the app offers to do the same for every transaction with that name, now and later.
@@ -65,7 +75,7 @@ Click a transaction to open it beside the list (over it on a smaller screen); th
 New transactions come without the codes and account numbers banks add to their names, like "Conf# 1A2B3C4D" or "SAV 1234", and without the note a Zelle sender wrote. When Plaid knows the merchant, the transaction gets its name. What the bank sent stays under **From your bank** on the transaction.
 
 1. Rename a transaction, and the app offers to rename the others with that name, and the new ones that come with it.
-2. Taking the offer makes a rule. Rules are listed on **Categories & rules**, where **Rename to** makes one by hand.
+2. Taking the offer makes a rule. Rules are listed on **Rules & tags**, where **Rename to** makes one by hand.
 3. A name you change by hand stays, whatever the bank or a rule says later.
 4. **Settings → Names from your bank** offers rules that name new transactions the way your earlier ones are named, in your Copilot history or by you. Below them, it lists the earlier transactions whose names can still be cleaned up. Nothing changes until you press a button.
 
@@ -122,7 +132,7 @@ On **Transactions**, press **?** to see them:
 
 ## Tags
 
-On a transaction, type a tag to add it (an existing one or a new one), or press × on one to take it off. Pick a tag above the list to see everything with it, and take it off all of them at once from there. Rename, recolor or delete tags on **Categories & rules**.
+On a transaction, type a tag to add it (an existing one or a new one), or press × on one to take it off. Pick a tag above the list to see everything with it, and take it off all of them at once from there. Rename, recolor or delete tags on **Rules & tags**.
 
 ## Cash, gift cards and store credit
 

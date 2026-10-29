@@ -231,3 +231,44 @@ def test_what_is_set_aside_from_everyday_spending_is_kept(conn):
     assert reports.everyday(conn) == reports.no_leave_outs()
     conn.execute("""UPDATE meta SET value = '{"id": [1, {"x": 2}], "over": "lots"}' WHERE key = 'everyday'""")
     assert reports.everyday(conn) == {**reports.no_leave_outs(), "id": [1]}
+
+
+def test_budgets_can_differ_by_month(conn):
+    ids = setup(conn)  # Food has a budget of 500, Groceries 300 and Fun 100, every month
+    conn.execute("INSERT INTO budgets (category_id, month, amount) VALUES (?, '2026-10', 650), (?, '2026-12', NULL)",
+                 (ids["food"], ids["fun"]))
+    assert reports.effective_budgets(conn, "2026-09")[ids["food"]] == 500  # before any month of its own
+    assert reports.effective_budgets(conn, "2026-10")[ids["food"]] == 650
+    assert reports.effective_budgets(conn, "2027-03")[ids["food"]] == 650  # until a later month says otherwise
+    assert reports.effective_budgets(conn, "2026-12")[ids["fun"]] is None  # none from December on
+    nodes = {n["name"]: n for n in reports.category_spending(conn, "2026-10")}
+    assert (nodes["Food"]["budget"], nodes["Food"]["total_budget"]) == (650, 650)
+
+
+def test_a_budget_that_rolls_over_carries_what_was_left_or_over(conn):
+    ids = setup(conn)
+    conn.execute("UPDATE categories SET rollover_since = '2026-09' WHERE id IN (?, ?)", (ids["fun"], ids["food"]))
+    # Fun: 100 a month; September spent 10, so 90 carries into October, where 60 was spent: 130 left.
+    fun = next(n for n in reports.category_spending(conn, "2026-10") if n["name"] == "Fun")
+    assert (fun["carry"], fun["total_budget"], fun["spent"], fun["rollover"]) == (90.0, 190.0, 60.0, "2026-09")
+    # Into November: 90 + (100 - 60) left. Food counts its groceries too: 500 - 130 in October, nothing in September.
+    carry = reports.rollover_carry(conn, "2026-11")
+    assert carry == {ids["fun"]: 130.0, ids["food"]: 870.0}
+    assert reports.rollover_carry(conn, "2026-09") == {}  # from the month it's switched on, nothing has carried yet
+    # Going over carries too, as less to spend.
+    conn.execute("UPDATE categories SET budget = 20 WHERE id = ?", (ids["fun"],))
+    assert reports.rollover_carry(conn, "2026-11")[ids["fun"]] == -30.0  # 20 - 10, then 20 - 60
+
+
+def test_a_budget_is_set_from_a_month_on_or_for_that_month_alone(conn):
+    ids = setup(conn)  # Food: 500 every month
+    budget = lambda m: reports.effective_budgets(conn, m)[ids["food"]]
+    assert reports.set_budget(conn, ids["food"], "2026-10", 600, only=True)
+    assert [budget(m) for m in ("2026-09", "2026-10", "2026-11", "2027-02")] == [500, 600, 500, 500]
+    assert reports.set_budget(conn, ids["food"], "2026-12", 700)  # from December on
+    assert [budget(m) for m in ("2026-10", "2026-11", "2026-12", "2027-02")] == [600, 500, 700, 700]
+    assert reports.set_budget(conn, ids["food"], "2026-10", 450)  # from October on: the later ones go
+    assert [budget(m) for m in ("2026-09", "2026-10", "2026-12")] == [500, 450, 450]
+    assert not reports.set_budget(conn, ids["food"], "2026-11", 450)  # the same as it is: nothing written
+    assert reports.set_budget(conn, ids["food"], "2026-11", None)
+    assert budget("2026-11") is None and budget("2026-10") == 450

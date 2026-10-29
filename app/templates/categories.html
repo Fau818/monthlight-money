@@ -1,155 +1,101 @@
 {% extends "base.html" %}
-{% from "_macros.html" import category_select, badge, icon with context %}
+{% from "_macros.html" import month_nav, meter, left_text, badge, budget_row, icon with context %}
 {% block title %}Categories{% endblock %}
 {% block content %}
-<div class="page-head"><h1>Categories &amp; rules</h1></div>
+{{ month_nav("/categories", month, prev_month, next_month, this_month, "&edit=1" if editing else "") }}
 
-{% if not cats %}
-  <div class="notice">No categories yet. Your Copilot import brings in yours.
-    <form method="post" action="/categories/defaults" class="inline"><button type="submit">Or start with the defaults</button></form>
+<section class="card budget-summary">
+  <div class="spend-head">
+    <div>
+      <div class="label">Spent in {{ month|month_name }}</div>
+      {% set dollars, cents = totals.spent|money_parts %}
+      <div class="hero">{{ dollars }}<span class="cents">{{ cents }}</span></div>
+      {% if budget %}
+        <div class="spend-sub">
+          <span>{{ left_text(totals.spent, budget, "your " ~ budget|money ~ " budget") }}</span>
+          {% if days_left and totals.spent < budget %}<span class="muted">About {{ ((budget - totals.spent) / days_left)|money }} a day for the {{ plural(days_left, "day") }} left</span>{% endif %}
+        </div>
+      {% endif %}
+    </div>
+    {% if not editing %}<a class="button" href="/categories?month={{ month }}&edit=1">Edit budgets</a>{% endif %}
   </div>
-{% endif %}
-
-{% if cats %}
-  <section class="card">
-    <h2>Categories</h2>
-    <p class="muted small">Each category gets an emoji and a color from its name, in a color of its own while there are colors left. Change them, or leave the emoji empty to go back to the automatic one.</p>
-    <ul class="cat-manage">
-      {% for c in cats %}
-        {% set look = looks[c.id] %}
-        <li class="{% if c.parent_id %}child{% endif %}{% if c.excluded %} inactive{% endif %}">
-          <details class="expand">
-          <summary class="cat-row static" title="Edit {{ c.name }}">
-            {{ badge(look, "small" if c.parent_id else "") }}
-            <span class="cat-name">{{ c.name }}{% if c.excluded %} <span class="badge">Left out of spending</span>{% endif %}</span>
-            <span class="muted small">{{ plural(c.uses, "transaction") }}</span>
-            <span class="chev">{{ icon("right") }}</span>
-          </summary>
-          <div class="expand-body">
-            <form method="post" action="/categories/{{ c.id }}" class="edit-grid">
-              <label>Name <input name="name" value="{{ c.name }}" required></label>
-              <label>Emoji <input name="emoji" value="{{ c.emoji or '' }}" placeholder="{{ look.emoji }}" class="emoji-input" maxlength="16" aria-describedby="emoji-help"></label>
-              <fieldset class="swatches">
-                <legend>Color</legend>
-                {% for color in colors %}
-                  <label class="swatch tint-{{ color }}" title="{{ color|capitalize }}"><input type="radio" name="color" value="{{ color }}"{% if look.color == color %} checked{% endif %}><span class="sr-only">{{ color|capitalize }}</span></label>
-                {% endfor %}
-              </fieldset>
-              <label>Group
-                <select name="parent_id">
-                  <option value="">None (top level)</option>
-                  {% for p in top_level if p.id != c.id %}<option value="{{ p.id }}"{% if p.id == c.parent_id %} selected{% endif %}>{{ p.name }}</option>{% endfor %}
-                </select>
-              </label>
-              <label class="check"><input type="checkbox" name="excluded" value="1"{% if c.excluded %} checked{% endif %}> Leave out of spending</label>
-              <div class="form-actions"><button type="submit" class="primary">Save</button></div>
-            </form>
-            <form method="post" action="/categories/{{ c.id }}/delete" data-confirm="Delete {{ c.name }}? Its {{ c.uses }} transactions become uncategorized.">
-              <button type="submit" class="link danger-text">Delete category</button>
-            </form>
-          </div>
-          </details>
-        </li>
-      {% endfor %}
-    </ul>
-    <p id="emoji-help" class="muted small">To pick an emoji, press Control-Command-Space on a Mac, or the Windows key and the period key on Windows.</p>
-    <form method="post" action="/categories" class="filters add-row">
-      <input name="name" placeholder="New category" required aria-label="New category name">
-      <select name="parent_id" aria-label="Group"><option value="">Top level</option>{% for p in top_level %}<option value="{{ p.id }}">In {{ p.name }}</option>{% endfor %}</select>
-      <button type="submit">{{ icon("plus") }} Add</button>
-    </form>
-  </section>
-{% endif %}
-
-<section class="card" id="tags">
-  <h2>Tags</h2>
-  <p class="muted small">Tags label transactions so you can find them again: add them on a transaction's page, and pick one above the transaction list to see everything with it.</p>
-  {% if tag_looks %}
-    <ul class="cat-manage">
-      {% for g in tag_looks.values() %}
-        {% set uses = tag_uses.get(g.id, 0) %}
-        <li>
-          <details class="expand">
-            <summary class="tag-row" title="Edit {{ g.name }}">
-              <span><span class="tag tint-{{ g.color }}">{{ g.name }}</span></span>
-              <span class="muted small">{{ plural(uses, "transaction") }}</span>
-              <span class="chev">{{ icon("right") }}</span>
-            </summary>
-            <div class="expand-body flush">
-              <form method="post" action="/tags/{{ g.id }}" class="edit-grid">
-                <label>Name <input name="name" value="{{ g.name }}" required maxlength="40"></label>
-                <fieldset class="swatches">
-                  <legend>Color</legend>
-                  {% for color in colors %}
-                    <label class="swatch tint-{{ color }}" title="{{ color|capitalize }}"><input type="radio" name="color" value="{{ color }}"{% if g.color == color %} checked{% endif %}><span class="sr-only">{{ color|capitalize }}</span></label>
-                  {% endfor %}
-                </fieldset>
-                <div class="form-actions"><button type="submit" class="primary">Save</button>{% if uses %}<a href="/transactions?tag={{ g.id }}">Show its transactions</a>{% endif %}</div>
-              </form>
-              <form method="post" action="/tags/{{ g.id }}/delete" data-confirm="Delete the tag {{ g.name }}? It comes off {{ plural(uses, 'transaction') }}, which stay as they are.">
-                <button type="submit" class="link danger-text">Delete tag</button>
-              </form>
-            </div>
-          </details>
-        </li>
-      {% endfor %}
-    </ul>
-  {% else %}
-    <p class="muted small">No tags yet.</p>
-  {% endif %}
-  <form method="post" action="/tags" class="filters add-row">
-    <input name="name" placeholder="New tag" required maxlength="40" aria-label="New tag name">
-    <button type="submit">{{ icon("plus") }} Add</button>
-  </form>
+  {% if budget %}{{ meter(totals.spent, budget, "blue") }}{% endif %}
 </section>
 
-<section class="card" id="rules">
-  <h2>Rules</h2>
-  <p class="muted small">Rules run on new transactions before Plaid's category is used, and can give them a name of yours. “Is” matches the whole name, “contains” matches part of it, ignoring capitals. Rules from your Copilot history are added for you, and <a href="/names">Names from your bank</a> offers more from your earlier names.</p>
-  <form method="post" action="/rules" class="filters add-row">
-    <select name="match" aria-label="Match"><option value="contains">Name contains</option><option value="equals">Name is</option></select>
-    <input name="pattern" placeholder="e.g. trader joe" required aria-label="Text to match">
-    {{ category_select("category_id", options, none, empty="Keep category") }}
-    <select name="type" aria-label="Type"><option value="">Keep type</option>{% for t in types %}<option value="{{ t }}">{{ t|capitalize }}</option>{% endfor %}</select>
-    <input name="rename_to" placeholder="Keep name" maxlength="120" aria-label="New name">
-    <label class="check"><input type="checkbox" name="apply" value="1" checked> Also apply to past transactions</label>
-    <button type="submit">Add rule</button>
-  </form>
-  {% if rules %}
-    <div class="table-scroll">
-      <table class="compact">
-        <thead><tr><th>When the name…</th><th>Category</th><th>Type</th><th>Rename to</th><th></th></tr></thead>
-        <tbody>
-          {% for r in rules %}
-            <tr>
-              <td>{{ "is" if r.match == "equals" else "contains" }} “{{ r.pattern }}”</td>
-              <td>{% if r.category_id %}{{ looks[r.category_id].emoji }} {% endif %}{{ r.category or "—" }}</td>
-              <td>{{ r.type or "—" }}</td>
-              <td>{{ r.rename_to or "—" }}</td>
-              <td class="num"><form method="post" action="/rules/{{ r.id }}/delete" class="inline"><button type="submit" class="link">Delete</button></form></td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  {% endif %}
-</section>
-
-<section class="card" id="plaid">
-  <h2>Plaid's categories</h2>
-  <p class="muted small">Plaid labels every transaction it sends. This table says which of your categories each label goes to; it fills in automatically by name and learns when you recategorize something.</p>
-  <form method="post" action="/plaid-map">
-    <div class="table-scroll">
-      <table class="compact">
-        {% for code in codes %}
-          <tr>
-            <td>{{ code|plaid_label }}</td>
-            <td>{{ category_select("map_" ~ code, options, mapping.get(code), empty="— not mapped —", label="Category for " ~ (code|plaid_label)) }}</td>
-          </tr>
+{% if editing %}
+  <form method="post" action="/budgets" class="card">
+    <input type="hidden" name="back" value="/categories?month={{ month }}"><input type="hidden" name="month" value="{{ month }}">
+    <p class="muted">A group's budget covers its subcategories; leave it empty to add up the subcategories' budgets instead. A category's own page sets whether what's left or over rolls over into the next month.</p>
+    <fieldset class="field">
+      <legend>These budgets are for</legend>
+      <div class="segmented">
+        <label><input type="radio" name="apply" value="on" checked><span>{{ month|month_name }} and the months after</span></label>
+        <label><input type="radio" name="apply" value="month"><span>{{ month|month_label }} only</span></label>
+      </div>
+    </fieldset>
+    <ul class="budget-edit">
+      {% for n in nodes %}
+        {% set look = transaction_look(looks, "regular", n.id) %}
+        <li class="group-row">
+          {{ badge(look) }}<span class="cat-name"><strong>{{ n.name }}</strong><span class="muted small">{{ n.spent|money }} spent</span></span>
+          {% if n.id %}<input class="money" name="budget_{{ n.id }}" value="{{ '%.2f'|format(n.budget) if n.budget is not none else '' }}" inputmode="decimal" placeholder="{{ '%.2f'|format(n.total_budget) if n.total_budget else 'No budget' }}" aria-label="Budget for {{ n.name }}">{% endif %}
+        </li>
+        {% for ch in n.children %}
+          <li class="child-row">
+            {{ badge(transaction_look(looks, "regular", ch.id), "small") }}<span class="cat-name">{{ ch.name }}<span class="muted small">{{ ch.spent|money }} spent</span></span>
+            <input class="money" name="budget_{{ ch.id }}" value="{{ '%.2f'|format(ch.budget) if ch.budget is not none else '' }}" inputmode="decimal" placeholder="No budget" aria-label="Budget for {{ ch.name }}">
+          </li>
         {% endfor %}
-      </table>
-    </div>
-    <div class="form-actions"><button type="submit" class="primary">Save mapping</button></div>
+      {% endfor %}
+      {% if others %}
+        <li class="divider muted small">No spending this month</li>
+        {% for c in others %}
+          <li class="child-row">
+            {{ badge(transaction_look(looks, "regular", c.id), "small") }}<span class="cat-name">{{ c.name }}</span>
+            <input class="money" name="budget_{{ c.id }}" value="" inputmode="decimal" placeholder="No budget" aria-label="Budget for {{ c.name }}">
+          </li>
+        {% endfor %}
+      {% endif %}
+    </ul>
+    <div class="form-actions"><button type="submit" class="primary">Save budgets</button><a class="button" href="/categories?month={{ month }}">Cancel</a></div>
   </form>
-</section>
+{% else %}
+  {# Each category in a row, its subcategories under it; the others, with no spending or budget this month, after them. #}
+  <section class="card list-card">
+    <header class="month-head"><h2>{{ month|month_label }}</h2>
+      {% if budget %}<dl class="month-totals"><div><dt>Budgeted</dt><dd>{{ budget|money }}</dd></div><div><dt>Spent</dt><dd>{{ totals.spent|money }}</dd></div></dl>{% endif %}
+    </header>
+    {% if nodes %}
+      <ul class="txns">
+        {% for n in nodes %}
+          {{ budget_row(n, month) }}
+          {% for ch in n.children %}{{ budget_row(ch, month, child=true) }}{% endfor %}
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="empty">No spending in {{ month|month_name }} yet. <a href="/categories?month={{ month }}&edit=1">Set budgets</a> for the month ahead.</p>
+    {% endif %}
+  </section>
+  {% if others %}
+    <section class="card list-card">
+      <header class="month-head"><h2>Nothing spent in {{ month|month_name }}</h2></header>
+      <ul class="txns">
+        {% for c in others %}
+          <li class="txn{% if c.parent_id %} child{% endif %}">
+            {{ badge(transaction_look(looks, "regular", c.id), "small") }}
+            <div class="txn-main"><a class="txn-name" href="/categories/{{ c.id }}?month={{ month }}">{{ c.name }}</a></div>
+            <div class="txn-cat"></div><div class="txn-amount muted">$0.00</div><div class="txn-review"></div>
+          </li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% endif %}
+  {% if left_out %}<p class="muted small">Left out of spending: {% for c in left_out %}<a href="/categories/{{ c.id }}">{{ c.name }}</a>{{ ", " if not loop.last }}{% endfor %}.</p>{% endif %}
+  <form method="post" action="/categories" class="filters add-row">
+    <input type="hidden" name="back" value="{{ here }}">
+    <input name="name" placeholder="New category" required aria-label="New category name">
+    <select name="parent_id" aria-label="Group"><option value="">Top level</option>{% for p in top_level %}<option value="{{ p.id }}">In {{ p.name }}</option>{% endfor %}</select>
+    <button type="submit">{{ icon("plus") }} Add a category</button>
+  </form>
+{% endif %}
 {% endblock %}

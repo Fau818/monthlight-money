@@ -291,3 +291,35 @@
     <div class="txn-review"></div>
   </li>
 {% endmacro %}
+
+{# A category as a row of the Categories page (main.budget_rows): its badge, its name with what's left of its budget,
+   its pace and the recurring charges still to come, a meter (what's spent, what's expected hatched, and a tick for how
+   far through the month it is), and what's spent of what it has to spend. It opens the category's page. #}
+{% macro budget_row(n, month, child=false) %}
+  {% set look = transaction_look(looks, "regular", n.id) %}
+  {% set whole = n.total_budget %}
+  <li class="txn budget-line{% if child %} child{% endif %}{% if whole and n.spent > whole %} over{% endif %}">
+    {{ badge(look, "small" if child else "") }}
+    <div class="txn-main">
+      <a class="txn-name" href="{{ ('/categories/' ~ n.id ~ '?month=' ~ month) if n.id else ('/transactions?month=' ~ month ~ '&category=none') }}">{{ n.name }}</a>
+      <span class="txn-sub">
+        {%- if whole %}<span>{{ left_text(n.spent, whole) }}</span>{% endif -%}
+        {%- if n.pace and n.spent < whole - 0.005 %}<span class="budget-extra">{% if n.pace.ahead > 0.5 %}{{ n.pace.ahead|money }} ahead of pace{% elif n.pace.ahead < -0.5 %}{{ (-n.pace.ahead)|money }} under pace{% else %}on pace{% endif %}</span>{% endif -%}
+        {%- if n.expected %}<span class="budget-extra" title="Recurring charges still to come this month">{{ n.expected|money }} still to come</span>{% endif -%}
+        {%- if n.rollover %}<span class="mark" title="What's left or over carries into the next month, since {{ n.rollover|month_label }}">{{ icon("repeat") }}<span class="mark-text">rolls over{% if n.carry %} {{ "+" if n.carry > 0 }}{{ n.carry|money }}{% endif %}</span></span>{% endif -%}
+      </span>
+    </div>
+    <div class="txn-cat">
+      {% if whole %}
+        {% set over = n.spent > whole %}
+        <div class="meter budget-meter tint-{{ look.color }}{% if over %} over{% endif %}" aria-hidden="true">
+          <span style="width: {{ percent(n.spent, whole) }}%"></span>
+          {%- if n.expected and not over %}<i class="expected" style="left: {{ percent(n.spent, whole) }}%; width: {{ [percent(n.expected, whole), 100 - percent(n.spent, whole)]|min }}%"></i>{% endif -%}
+          {%- if n.pace %}<b class="pace" style="left: {{ n.pace.percent }}%"></b>{% endif -%}
+        </div>
+      {% endif %}
+    </div>
+    <div class="txn-amount">{{ n.spent|money }}{% if whole %}<span class="muted of"> / {{ whole|money }}</span>{% endif %}</div>
+    <div class="txn-review"></div>
+  </li>
+{% endmacro %}

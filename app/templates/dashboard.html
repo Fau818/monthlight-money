@@ -148,13 +148,13 @@
 
   <div class="dash-side">
     <section class="card">
-      <div class="card-head"><h2>{{ "Budgets" if budget else "Top categories" }}</h2><a href="/budgets?month={{ month }}">{{ "See all" if budget else "Set budgets" }}</a></div>
+      <div class="card-head"><h2>{{ "Budgets" if budget else "Top categories" }}</h2><a href="/categories?month={{ month }}{{ '' if budget else '&edit=1' }}">{{ "See all" if budget else "Set budgets" }}</a></div>
       {% if nodes %}
         <ul class="cat-list">
           {% for n in nodes[:6] %}
             {% set look = transaction_look(looks, "regular", n.id) %}
             <li>
-              <a class="cat-row" href="/transactions?month={{ month }}&category={{ n.id if n.id else 'none' }}">
+              <a class="cat-row" href="{{ ('/categories/' ~ n.id ~ '?month=' ~ month) if n.id else ('/transactions?month=' ~ month ~ '&category=none') }}">
                 {{ badge(look) }}
                 <span class="cat-name">{{ n.name }}</span>
                 <span class="cat-amount">{{ n.spent|money }}</span>

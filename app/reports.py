@@ -121,39 +121,88 @@ def spending_pace(conn: sqlite3.Connection, month: str, today: date | None = Non
     return {"this": this, "last": last, "days": max(days_in_month, len(last)), "last_same_day": same_day}
 
 
+def spending_by_category(conn: sqlite3.Connection, start: str, end: str) -> dict[tuple[str, int | None], float]:
+    """Returns the spending from `start` to `end` (ISO days, the end left out) by month and category, as month_totals
+    counts it: {(YYYY-MM, category id or None): amount}."""
+    return {(r["month"], r["category_id"]): r["spent"] for r in conn.execute(
+        f"""SELECT substr({DAY}, 1, 7) AS month, {CATEGORY} AS category_id, -sum(t.amount) AS spent {_SPENDING}
+              AND t.type = 'regular' AND coalesce(c.excluded, 0) = 0
+            GROUP BY 1, 2""",
+        {"start": start, "end": end},
+    )}
+
+
+def effective_budgets(conn: sqlite3.Connection, month: str) -> dict[int, float | None]:
+    """Returns each category's budget for `month`, by id: the one set from the latest month on or before it (the
+    budgets table), else the category's own."""
+    return {r["id"]: r["budget"] for r in conn.execute(
+        """SELECT c.id, CASE WHEN b.month IS NULL THEN c.budget ELSE b.amount END AS budget FROM categories c
+           LEFT JOIN budgets b ON b.category_id = c.id
+             AND b.month = (SELECT max(x.month) FROM budgets x WHERE x.category_id = c.id AND x.month <= ?)""",
+        (month,))}
+
+
+def rollover_carry(conn: sqlite3.Connection, month: str) -> dict[int, float]:
+    """Returns what carries into `month` for each category whose budget rolls over (categories.rollover_since, before
+    `month`), by id: what was left of its budget in each month since, minus what went over it. A group counts its
+    subcategories' spending too; a month without a budget carries nothing."""
+    rolling = conn.execute("SELECT id, rollover_since FROM categories WHERE rollover_since IS NOT NULL AND rollover_since < ? AND excluded = 0",
+                           (month,)).fetchall()
+    if not rolling:
+        return {}
+    first = min(r["rollover_since"] for r in rolling)
+    spent = spending_by_category(conn, month_range(first)[0], month_range(month)[0])
+    children: dict[int, list[int]] = {}
+    for r in conn.execute("SELECT id, parent_id FROM categories WHERE parent_id IS NOT NULL AND excluded = 0"):
+        children.setdefault(r["parent_id"], []).append(r["id"])
+    budgets_by_month: dict[str, dict] = {}
+    carry = {}
+    for r in rolling:
+        total, m = 0.0, r["rollover_since"]
+        while m < month:
+            if m not in budgets_by_month:
+                budgets_by_month[m] = effective_budgets(conn, m)
+            budget = budgets_by_month[m].get(r["id"])
+            if budget is not None:
+                total += budget - sum(spent.get((m, cid), 0.0) for cid in [r["id"], *children.get(r["id"], [])])
+            m = shift_month(m, 1)
+        carry[r["id"]] = round(total, 2) + 0.0  # NOTE: + 0.0 turns -0.0 into 0.0
+    return carry
+
+
 def category_spending(conn: sqlite3.Connection, month: str) -> list[dict]:
-    """Returns the month's spending as top-level categories, largest first. Each has its subcategories, a
-    spending total that includes them, and total_budget (its own budget, else its subcategories' combined).
-    Categories with a budget appear even with no spending."""
+    """Returns the month's spending as top-level categories, largest first. Each has its subcategories, a spending
+    total that includes them, its budget for the month (effective_budgets), "carry" (what rolls over into the month,
+    rollover_carry) and "rollover" (the month it rolls over since, if it does), and total_budget: what it has to
+    spend, its budget and carry, else its subcategories' combined. Categories with a budget appear even with no
+    spending."""
     start, end = month_range(month)
-    own = {
-        r["category_id"]: r["spent"]
-        for r in conn.execute(
-            f"""SELECT {CATEGORY} AS category_id, -sum(t.amount) AS spent {_SPENDING}
-                  AND t.type = 'regular' AND coalesce(c.excluded, 0) = 0
-                GROUP BY 1""",
-            {"start": start, "end": end},
-        )
-    }
-    cats = conn.execute("SELECT id, name, parent_id, budget FROM categories WHERE excluded = 0 ORDER BY name").fetchall()
-    nodes = {c["id"]: {"id": c["id"], "name": c["name"], "budget": c["budget"], "spent": round(own.get(c["id"], 0), 2), "children": []}
-             for c in cats}
+    own = {cid: amount for (_, cid), amount in spending_by_category(conn, start, end).items()}
+    budgets, carry = effective_budgets(conn, month), rollover_carry(conn, month)
+    cats = conn.execute("SELECT id, name, parent_id, rollover_since FROM categories WHERE excluded = 0 ORDER BY name").fetchall()
+    nodes = {}
+    for c in cats:
+        budget = budgets.get(c["id"])
+        nodes[c["id"]] = {"id": c["id"], "name": c["name"], "budget": budget, "spent": round(own.get(c["id"], 0), 2), "children": [],
+                          "carry": carry.get(c["id"], 0.0) if budget is not None else 0.0,
+                          "rollover": c["rollover_since"] if c["rollover_since"] and c["rollover_since"] <= month else None}
     roots = []
     for c in cats:
         parent = nodes.get(c["parent_id"])
         (parent["children"] if parent else roots).append(nodes[c["id"]])
     for node in nodes.values():
-        node["total_budget"] = node["budget"]
+        node["total_budget"] = round(node["budget"] + node["carry"], 2) if node["budget"] is not None else None
     for node in roots:
         node["own_spent"] = node["spent"]
         node["spent"] = round(node["spent"] + sum(ch["spent"] for ch in node["children"]), 2)
-        node["total_budget"] = node["budget"] or round(sum(ch["budget"] or 0 for ch in node["children"]), 2) or None
+        if node["budget"] is None:
+            node["total_budget"] = round(sum(ch["total_budget"] or 0 for ch in node["children"]), 2) or None
         node["children"] = sorted((ch for ch in node["children"] if ch["spent"] or ch["budget"]), key=lambda n: -n["spent"])
     if own.get(None):
         spent = round(own[None], 2)
-        roots.append({"id": None, "name": "Uncategorized", "budget": None, "total_budget": None,
+        roots.append({"id": None, "name": "Uncategorized", "budget": None, "total_budget": None, "carry": 0.0, "rollover": None,
                       "spent": spent, "own_spent": spent, "children": []})
-    shown = [n for n in roots if n["spent"] or n["budget"] or n["children"]]
+    shown = [n for n in roots if n["spent"] or n["budget"] is not None or n["children"]]
     return sorted(shown, key=lambda n: -n["spent"])
 
 
@@ -475,3 +524,21 @@ def set_everyday(conn: sqlite3.Connection, leave: dict) -> None:
     if leave.get("over") is not None:
         kept["over"] = leave["over"]
     set_meta(conn, "everyday", json.dumps(kept))
+
+
+def set_budget(conn: sqlite3.Connection, category_id: int, month: str, amount: float | None, only: bool = False) -> bool:
+    """Sets a category's budget from `month` on, or for that month alone (`only`), when the month after keeps the budget
+    it had. Returns whether anything changed."""
+    later = conn.execute("SELECT 1 FROM budgets WHERE category_id = ? AND month > ? LIMIT 1", (category_id, month)).fetchone()
+    if effective_budgets(conn, month).get(category_id) == amount and (only or not later):
+        return False
+    if only:
+        after = shift_month(month, 1)
+        if not conn.execute("SELECT 1 FROM budgets WHERE category_id = ? AND month = ?", (category_id, after)).fetchone():
+            conn.execute("INSERT INTO budgets (category_id, month, amount) VALUES (?, ?, ?)",
+                         (category_id, after, effective_budgets(conn, after).get(category_id)))
+    else:
+        conn.execute("DELETE FROM budgets WHERE category_id = ? AND month > ?", (category_id, month))
+    conn.execute("INSERT INTO budgets (category_id, month, amount) VALUES (?, ?, ?) "
+                 "ON CONFLICT (category_id, month) DO UPDATE SET amount = excluded.amount", (category_id, month, amount))
+    return True

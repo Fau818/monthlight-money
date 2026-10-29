@@ -545,6 +545,34 @@ ul.txns { container-type: inline-size; }
 .up-name a { color: var(--ink); }
 .switch > span { font-size: 0.9rem; color: var(--ink-2); }
 .sheet .switch > span { font-size: 0.85rem; }
+
+/* ---- categories and budgets (v0.2.5) ---- */
+.budget-line { grid-template-columns: 28px minmax(0, 1fr) 150px 12.5em 0; }  /* the meters line up, row under row */
+.txn.child { padding-left: 30px; }
+.txn.child > .cat-icon { width: 24px; height: 24px; font-size: 13px; }
+.budget-meter { position: relative; width: 150px; margin: 0; overflow: visible; }
+.budget-meter > span { position: relative; }
+.budget-meter .expected { position: absolute; top: 0; height: 100%; border-radius: 0 3px 3px 0;
+  background: repeating-linear-gradient(135deg, var(--tint) 0 2px, transparent 2px 4px); opacity: 0.6; }
+.budget-meter .pace { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--ink-2); }
+.budget-line .txn-amount { white-space: nowrap; }
+.budget-line .txn-amount .of { font-weight: 500; font-size: 0.85em; }
+.budget-line.over .txn-amount { color: var(--critical-text); }
+@container (max-width: 600px) {
+  .budget-line { grid-template-columns: 28px minmax(0, 1fr) auto auto; grid-template-areas: "icon name name amount" "icon sub cat cat"; }
+  .budget-meter { width: 96px; }
+  .budget-line .txn-sub > .budget-extra { display: none; }  /* what's left, and whether it rolls over, still show */
+}
+.page-title.with-badge { display: flex; align-items: center; gap: 14px; }
+.month-nav.compact { margin: 0; }
+.columns-chart.tinted .col .bar { background: color-mix(in srgb, var(--tint) 30%, var(--surface)); }
+.columns-chart.tinted .col.selected .bar, .columns-chart.tinted .col:hover .bar { background: var(--tint); }
+.cat-links { columns: 2 220px; }
+.cat-links li { break-inside: avoid; }
+.cat-links a { gap: 8px; padding: 6px 0; color: var(--ink); }
+.cat-links .muted { margin-left: auto; }
+.cat-links li.child a { padding-left: 20px; }
+.category-txns .day-head { margin: 0 calc(-1 * var(--pad)); padding: 10px var(--pad) 4px; }
 .everyday-form .filter-list { max-height: 260px; }
 /* The dashboard's months, with Everyday on: each bar's set-aside part on top of its everyday part, hatched gray. */
 .col .bar .bar-aside { position: absolute; left: 0; right: 0; top: 0; border-radius: 4px 4px 0 0; border-bottom: 2px solid var(--surface);

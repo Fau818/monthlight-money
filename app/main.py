@@ -35,12 +35,12 @@ HERE = Path(__file__).parent
 templates = Jinja2Templates(directory=HERE / "templates")
 # (path, label, icon). The main pages are also the tab bar on a phone; the others sit under More there, Reports first.
 NAV = [
-    ("/", "Dashboard", "home"), ("/transactions", "Transactions", "list"), ("/budgets", "Budgets", "pie"),
+    ("/", "Dashboard", "home"), ("/transactions", "Transactions", "list"), ("/categories", "Categories", "pie"),
     ("/recurring", "Recurring", "repeat"), ("/accounts", "Accounts", "bank"),
 ]
 REPORTS_NAV = ("/reports", "Reports", "chart")
 SIDE_NAV = NAV[:2] + [REPORTS_NAV] + NAV[2:]
-MORE_NAV = [("/categories", "Categories & rules", "tag"), ("/import", "Import", "download"), ("/settings", "Settings", "sliders")]
+MORE_NAV = [("/rules", "Rules & tags", "tag"), ("/import", "Import", "download"), ("/settings", "Settings", "sliders")]
 FOLDED_COOKIE = "sidebar_folded"  # the account groups folded in the sidebar, by kind: "credit,loan" (app.js sets it)
 THEME_COOKIE = "theme"  # "light" or "dark" when picked (POST /theme, or app.js); else the system's
 PAGE_SIZE = 200
@@ -1440,39 +1440,86 @@ def register_routes(app: FastAPI) -> None:
             set_meta(conn, "everyday_shown", "1" if shown == "1" else "")
         return redirect(safe_back(back, "/"))
 
-    # ---- budgets ----
+    # ---- categories and budgets ----
 
     @app.get("/budgets")
-    def budgets(request: Request, month: str | None = None, edit: str = "", conn=Depends(get_db)):
+    def old_budgets(request: Request):
+        """Budgets are on Categories now; older links lead there."""
+        return RedirectResponse("/categories" + (f"?{request.url.query}" if request.url.query else ""), status_code=303)
+
+    @app.get("/categories")
+    def categories_page(request: Request, month: str | None = None, edit: str = "", conn=Depends(get_db)):
+        """Categories: what each spent in the month against its budget (budget_rows), the others below; with `edit`, the
+        month's budgets to change, from then on or for that month alone."""
         today = date.today()
         month = reports.valid_month(month) or reports.current_month(today)
-        nodes = reports.category_spending(conn, month)
+        nodes = budget_rows(conn, reports.category_spending(conn, month), month, today)
         shown = {n["id"] for n in nodes} | {ch["id"] for n in nodes for ch in n["children"]}
-        unbudgeted = conn.execute("SELECT id, name FROM categories WHERE excluded = 0 ORDER BY name").fetchall()
-        # Days left in the current month, today included, for "about $X a day" (None for other months).
-        days_left = None
-        if month == reports.current_month(today):
-            days_left = (date.fromisoformat(reports.month_range(month)[1]) - today).days
+        every = conn.execute("SELECT id, name, parent_id FROM categories WHERE excluded = 0 ORDER BY name COLLATE NOCASE").fetchall()
+        days_left = (date.fromisoformat(reports.month_range(month)[1]) - today).days if month == reports.current_month(today) else None
         return render(
-            request, conn, "budgets.html", month=month, nodes=nodes, budget=reports.budget_total(nodes),
-            totals=reports.month_totals(conn, month), others=[c for c in unbudgeted if c["id"] not in shown],
+            request, conn, "categories.html", month=month, nodes=nodes, budget=reports.budget_total(nodes),
+            totals=reports.month_totals(conn, month), others=[c for c in every if c["id"] not in shown],
             prev_month=reports.shift_month(month, -1), next_month=reports.shift_month(month, 1),
             this_month=reports.current_month(today), editing=edit == "1", days_left=days_left,
+            left_out=conn.execute("SELECT id, name FROM categories WHERE excluded = 1 ORDER BY name COLLATE NOCASE").fetchall(),
+            top_level=[c for c in every if c["parent_id"] is None],
         )
 
     @app.post("/budgets")
     async def save_budgets(request: Request, conn=Depends(get_db)):
+        """Saves the budgets typed for a month (`month`, else this one): from then on, or for that month alone (`apply`
+        "month"); an empty one means no budget."""
         form = await request.form()
+        back = safe_back(str(form.get("back")), "/categories")
+        month = reports.valid_month(str(form.get("month") or "")) or reports.current_month(date.today())
+        only = form.get("apply") == "month"
         updates = []
         for key, value in form.items():
-            if key.startswith("budget_"):
+            if key.startswith("budget_") and key[7:].isdigit():
                 try:
-                    updates.append((optional_money(str(value)), int(key[7:])))
+                    updates.append((int(key[7:]), optional_money(str(value))))
                 except ValueError:
-                    return redirect(safe_back(str(form.get("back")), "/budgets"), f"“{value}” isn't a number.")
+                    return redirect(back, f"“{value}” isn't a number.")
         with conn:
-            conn.executemany("UPDATE categories SET budget = ? WHERE id = ?", updates)
-        return redirect(safe_back(str(form.get("back")), "/budgets"), "Budgets saved.")
+            for cid, amount in updates:
+                reports.set_budget(conn, cid, month, amount, only)
+        return redirect(back, f"Budgets saved for {month_label(month)} only." if only else f"Budgets saved from {month_label(month)} on.")
+
+    @app.get("/categories/{cid}")
+    def category_page(request: Request, cid: int, month: str | None = None, conn=Depends(get_db)):
+        """A category's own page (category_view): the month against its budget, its last 12 months, its top merchants,
+        the month's transactions, and its settings."""
+        cat = conn.execute("SELECT c.*, p.name AS parent_name FROM categories c LEFT JOIN categories p ON p.id = c.parent_id WHERE c.id = ?",
+                           (cid,)).fetchone()
+        if cat is None:
+            raise HTTPException(404, "Category not found.")
+        today = date.today()
+        month = reports.valid_month(month) or reports.current_month(today)
+        return render(request, conn, "category.html", cat=cat, month=month, **category_view(conn, cat, month, today),
+                      prev_month=reports.shift_month(month, -1), next_month=reports.shift_month(month, 1),
+                      this_month=reports.current_month(today), categories=category_options(conn),
+                      top_level=conn.execute("SELECT id, name FROM categories WHERE parent_id IS NULL AND id != ? ORDER BY name COLLATE NOCASE",
+                                             (cid,)).fetchall())
+
+    @app.post("/categories/{cid}/budget")
+    def save_category_budget(cid: int, amount: str = Form(""), month: str = Form(""), apply: str = Form(""), rollover: str = Form(""),
+                             conn=Depends(get_db)):
+        """Saves category `cid`'s budget for `month`, from then on or for that month alone (`apply` "month"), and whether
+        what's left of it or over it rolls over into the next month, counted from that month."""
+        month = reports.valid_month(month) or reports.current_month(date.today())
+        back = f"/categories/{cid}?month={month}"
+        if conn.execute("SELECT 1 FROM categories WHERE id = ?", (cid,)).fetchone() is None:
+            raise HTTPException(404, "Category not found.")
+        try:
+            budget = optional_money(amount)
+        except ValueError:
+            return redirect(back, f"“{amount.strip()}” isn't a number.")
+        with conn:
+            reports.set_budget(conn, cid, month, budget, apply == "month")
+            conn.execute("UPDATE categories SET rollover_since = CASE WHEN ? THEN coalesce(rollover_since, ?) END WHERE id = ?",
+                         (int(bool(rollover)), month, cid))
+        return redirect(back, "Budget saved.")
 
     # ---- recurring ----
 
@@ -1709,8 +1756,10 @@ def register_routes(app: FastAPI) -> None:
 
     # ---- categories and rules ----
 
-    @app.get("/categories")
-    def categories_page(request: Request, conn=Depends(get_db)):
+    @app.get("/rules")
+    def rules_page(request: Request, conn=Depends(get_db)):
+        """Rules, tags and the mapping of Plaid's categories to the user's; each category's own look and settings are on
+        its page (category_page)."""
         cats = conn.execute(
             """SELECT c.*, p.name AS parent, (SELECT count(*) FROM transactions t WHERE t.category_id = c.id) AS uses
                FROM categories c LEFT JOIN categories p ON p.id = c.parent_id
@@ -1723,21 +1772,21 @@ def register_routes(app: FastAPI) -> None:
             "SELECT r.*, c.name AS category FROM rules r LEFT JOIN categories c ON c.id = r.category_id ORDER BY r.pattern"
         ).fetchall()
         return render(
-            request, conn, "categories.html", cats=cats, options=category_options(conn),
+            request, conn, "rules.html", cats=cats, options=category_options(conn),
             top_level=[c for c in cats if c["parent_id"] is None], codes=codes, mapping=mapping, rules=rules,
             types=categorize.TYPES,
             tag_uses=dict(conn.execute("SELECT tag_id, count(*) FROM transaction_tags GROUP BY tag_id").fetchall()),
         )
 
     @app.post("/categories")
-    def add_category(name: str = Form(...), parent_id: str = Form(""), conn=Depends(get_db)):
+    def add_category(name: str = Form(...), parent_id: str = Form(""), back: str = Form("/categories"), conn=Depends(get_db)):
         name = name.strip()
         if not name:
-            return redirect("/categories", "Give the category a name.")
+            return redirect(safe_back(back, "/categories"), "Give the category a name.")
         with conn:
             categorize.get_or_create_category(conn, name, optional_int(parent_id))
             categorize.auto_map_plaid_categories(conn)
-        return redirect("/categories", f"Added {name}.")
+        return redirect(safe_back(back, "/categories"), f"Added {name}.")
 
     @app.post("/categories/defaults")
     def add_default_categories(conn=Depends(get_db)):
@@ -1747,7 +1796,9 @@ def register_routes(app: FastAPI) -> None:
 
     @app.post("/categories/{cid}")
     def save_category(cid: int, name: str = Form(...), parent_id: str = Form(""), excluded: str = Form(""),
-                      emoji: str = Form(""), color: str = Form(""), conn=Depends(get_db)):
+                      emoji: str = Form(""), color: str = Form(""), back: str = Form(""), conn=Depends(get_db)):
+        """Saves category `cid`'s name, group, emoji and color, and whether it counts in spending."""
+        back = safe_back(back, f"/categories/{cid}")
         parent = optional_int(parent_id)
         if parent == cid:
             parent = None
@@ -1759,8 +1810,8 @@ def register_routes(app: FastAPI) -> None:
                 conn.execute("UPDATE categories SET name = ?, parent_id = ?, excluded = ?, emoji = ?, color = ? WHERE id = ?",
                              (name.strip(), parent, int(bool(excluded)), emoji, color if color in looks.COLORS else None, cid))
         except sqlite3.IntegrityError:
-            return redirect("/categories", f"There's already a category called {name.strip()}.")
-        return redirect("/categories", "Category saved.")
+            return redirect(back, f"There's already a category called {name.strip()}.")
+        return redirect(back, "Category saved.")
 
     @app.post("/categories/{cid}/delete")
     def delete_category(cid: int, conn=Depends(get_db)):
@@ -1784,26 +1835,26 @@ def register_routes(app: FastAPI) -> None:
                         "ON CONFLICT (plaid_category) DO UPDATE SET category_id = excluded.category_id",
                         (code, category),
                     )
-        return redirect("/categories#plaid", "Plaid category mapping saved. It applies to new transactions.")
+        return redirect("/rules#plaid", "Plaid category mapping saved. It applies to new transactions.")
 
     @app.post("/rules")
     def add_rule(pattern: str = Form(...), match: str = Form("contains"), category_id: str = Form(""),
                  type: str = Form(""), rename_to: str = Form(""), apply: str = Form(""), conn=Depends(get_db)):
         if not pattern.strip() or match not in ("equals", "contains"):
-            return redirect("/categories#rules", "A rule needs some text to match.")
+            return redirect("/rules#rules", "A rule needs some text to match.")
         category, type_, rename_to = optional_int(category_id), type if type in categorize.TYPES else None, rename_to.strip()
         if category is None and type_ is None and not rename_to:
-            return redirect("/categories#rules", "Pick what the rule does: a category, a type or a new name.")
+            return redirect("/rules#rules", "Pick what the rule does: a category, a type or a new name.")
         with conn:
             rule_id = categorize.add_rule(conn, pattern, match, category, type_, rename_to)
             changed = categorize.apply_rule(conn, rule_id) if apply else 0
-        return redirect("/categories#rules", "Rule saved." + (f" Updated {changed} transactions." if apply else ""))
+        return redirect("/rules#rules", "Rule saved." + (f" Updated {changed} transactions." if apply else ""))
 
     @app.post("/rules/{rule_id}/delete")
     def delete_rule(rule_id: int, conn=Depends(get_db)):
         with conn:
             conn.execute("DELETE FROM rules WHERE id = ?", (rule_id,))
-        return redirect("/categories#rules", "Rule deleted.")
+        return redirect("/rules#rules", "Rule deleted.")
 
     # ---- tags ----
 
@@ -1811,28 +1862,28 @@ def register_routes(app: FastAPI) -> None:
     def add_tag(name: str = Form(...), color: str = Form(""), conn=Depends(get_db)):
         name = tags.clean_name(name)
         if not name:
-            return redirect("/categories#tags", "Give the tag a name.")
+            return redirect("/rules#tags", "Give the tag a name.")
         with conn:
             tags.get_or_create(conn, name, color)
-        return redirect("/categories#tags", f"Added the tag {name}.")
+        return redirect("/rules#tags", f"Added the tag {name}.")
 
     @app.post("/tags/{gid}")
     def save_tag(gid: int, name: str = Form(...), color: str = Form(""), conn=Depends(get_db)):
         name = tags.clean_name(name)
         if not name:
-            return redirect("/categories#tags", "Give the tag a name.")
+            return redirect("/rules#tags", "Give the tag a name.")
         try:
             with conn:
                 conn.execute("UPDATE tags SET name = ?, color = ? WHERE id = ?", (name, color if color in looks.COLORS else None, gid))
         except sqlite3.IntegrityError:
-            return redirect("/categories#tags", f"There's already a tag called {name}.")
-        return redirect("/categories#tags", "Tag saved.")
+            return redirect("/rules#tags", f"There's already a tag called {name}.")
+        return redirect("/rules#tags", "Tag saved.")
 
     @app.post("/tags/{gid}/delete")
     def delete_tag(gid: int, conn=Depends(get_db)):
         with conn:
             conn.execute("DELETE FROM tags WHERE id = ?", (gid,))
-        return redirect("/categories#tags", "Tag deleted. Its transactions are still there, without it.")
+        return redirect("/rules#tags", "Tag deleted. Its transactions are still there, without it.")
 
     @app.post("/tags/{gid}/remove")
     def remove_tag(gid: int, ids: list[int] = Form([]), back: str = Form("/transactions"), conn=Depends(get_db)):
@@ -2348,6 +2399,72 @@ def offsetting_together(rows: list) -> list:
 
 
 # ---- charts -------------------------------------------------------------------
+
+def budget_rows(conn, nodes: list[dict], month: str, today: date) -> list[dict]:
+    """Returns category_spending's `nodes`, each (and each subcategory) with what the Categories page shows beside it:
+    "expected", the recurring charges in it still to come this month (a group's with its subcategories'), and in the
+    month under way "pace": how far through the month it is ("percent") and how far spending is ahead of that share of
+    what it has to spend ("ahead", below zero when it's behind)."""
+    current = month == reports.current_month(today)
+    groups = reports.category_groups(conn)
+    due: Counter = Counter()
+    if current:
+        for r in recurring.month_summary(conn, recurring.list_recurring(conn, today), today)["due_items"]:
+            due[r["category_id"]] -= r["amount"]
+            if r["category_id"] is not None and groups.get(r["category_id"]) not in (None, r["category_id"]):
+                due[("group", groups[r["category_id"]])] -= r["amount"]
+    share = today.day / calendar.monthrange(*map(int, month.split("-")))[1] if current else None
+    for node in nodes:
+        for n in [node, *node["children"]]:
+            n["expected"] = round(due.get(n["id"], 0.0) + (due.get(("group", n["id"]), 0.0) if n is node else 0.0), 2)
+            n["pace"] = ({"percent": share * 100, "ahead": round(n["spent"] - n["total_budget"] * share, 2)}
+                         if share is not None and n["total_budget"] else None)
+    return nodes
+
+
+def category_view(conn, cat, month: str, today: date) -> dict:
+    """Returns what a category's page shows for `month`:
+    - the month: spent, its budget, what rolls over and what's left (category_spending), with expected charges and pace
+    - its last 12 months as columns, with its budget and the average of the months that are over, and the year so far
+    - its top merchants over those months, and the month's transactions by day"""
+    this_month = reports.current_month(today)
+    family = [cat["id"]] + [r[0] for r in conn.execute("SELECT id FROM categories WHERE parent_id = ? AND excluded = 0", (cat["id"],))]
+    nodes = budget_rows(conn, reports.category_spending(conn, month), month, today)
+    node = next((n for top in nodes for n in [top, *top["children"]] if n["id"] == cat["id"]), None)
+    if node is None:  # nothing spent and no budget this month
+        budget = reports.effective_budgets(conn, month).get(cat["id"])
+        node = {"spent": 0.0, "budget": budget, "carry": 0.0, "total_budget": budget, "expected": 0.0, "pace": None,
+                "rollover": cat["rollover_since"] if cat["rollover_since"] and cat["rollover_since"] <= month else None}
+    first = reports.shift_month(month, -11)
+    history = conn.execute("SELECT min(date) FROM transactions").fetchone()[0] or reports.month_range(month)[0]
+    months = [m for m in month_list(first, month) if m >= history[:7]] or [month]
+    spent = reports.spending_by_category(conn, reports.month_range(months[0])[0], reports.month_range(month)[1])
+    values = [round(sum(spent.get((m, c), 0.0) for c in family), 2) + 0.0 for m in months]
+    done = [v for m, v in zip(months, values) if m < this_month]
+    average = round(sum(done) / len(done), 2) if done else None
+    year = reports.spending_by_category(conn, f"{month[:4]}-01-01", reports.month_range(month)[1])
+    geometry = charts.bar_heights(values + [node["budget"] or 0.0, average or 0.0])
+    high = geometry["high"]
+    bars = [{"month": m, "spent": v, "height": h, "selected": m == month, "tick": datetime.strptime(m, "%Y-%m").strftime("%b"),
+             "year": m[:4] if i == 0 or m.endswith("-01") else ""} for i, (m, v, h) in enumerate(zip(months, values, geometry["heights"]))]
+    markers = [{"label": label, "value": value, "top": charts.y_percent(value, 0.0, high)}
+               for label, value in (("Budget", node["budget"]), ("Average", average)) if value]  # NOTE: a month's own, without what rolled over
+    merchants: dict[str, dict] = {}
+    for r in reports.counted(conn, reports.month_range(months[0])[0], reports.month_range(month)[1]):
+        if r["category_id"] in family:
+            m = merchants.setdefault(reports.merchant_key(r["merchant"]), {"name": r["merchant"], "total": 0.0, "count": 0})
+            m["total"] += r["value"]
+            m["count"] += 1
+    top = sorted((m for m in merchants.values() if m["total"] > 0), key=lambda m: -m["total"])[:8]
+    for m in top:
+        m.update(total=round(m["total"], 2), share=m["total"] / top[0]["total"] * 100)
+    rows, count = find_transactions(conn, dates=reports.month_range(month), categories=[str(c) for c in family], limit=-1)
+    return {"look": looks.category_looks(conn).get(cat["id"], looks.UNCATEGORIZED), "node": node, "family": family,
+            "chart": {"bars": bars, "ticks": geometry["ticks"], "markers": markers}, "average": average, "months_counted": len(done),
+            "year_spent": round(sum(v for (_, c), v in year.items() if c in family), 2) + 0.0,
+            "top_merchants": top, "days": group_by_day(rows, today), "count": count,
+            "budget_now": reports.effective_budgets(conn, month).get(cat["id"])}
+
 
 def column_labels(column: str, first: bool) -> dict:
     """Returns how a report's column (reports.column_of) is named: "tick" under its bar, "year" under that on the first

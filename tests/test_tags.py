@@ -61,7 +61,7 @@ def test_tags_are_managed_on_the_categories_page(client, settings):
     shell = conn.execute("SELECT id FROM transactions WHERE name = 'Shell'").fetchone()[0]
     with conn:
         tags.add(conn, gid, [shell])
-    page_text = unescape(client.get("/categories").text)
+    page_text = unescape(client.get("/rules").text)
     assert 'id="tags"' in page_text and "Work trip" in page_text and "1 transaction" in page_text
 
     client.post(f"/tags/{gid}", data={"name": "Business", "color": "violet"})

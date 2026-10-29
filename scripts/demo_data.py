@@ -5,7 +5,8 @@ Steps:
 2. Add 14 months of transactions up to today: bills, paychecks, everyday spending, paired moves between accounts, and
    tuition twice a year.
 3. Add a split, a purchase friends paid back, tags, recurring charges, and daily balances for the net worth chart.
-4. Set the tuition aside from everyday spending, and show it apart on the dashboard.
+4. Let one budget roll over and another differ for a month; set the tuition aside from everyday spending, and show it
+   apart on the dashboard.
 
 Run it with a folder that has no database yet, then point the app at that folder:
 
@@ -144,6 +145,13 @@ def build(folder: Path, today: date | None = None, seed: int = 2) -> Path:
         tags.add(conn, work, [dinner])
         for name, pattern, amount, category in RECURRING:
             recurring.track(conn, name, pattern, "monthly", amount, categories[category])
+
+        # Restaurants roll over from four months ago, and Shopping had a bigger budget for December alone.
+        conn.execute("UPDATE categories SET rollover_since = ? WHERE id = ?",
+                     (recurring.add_months(today.replace(day=1), -4).strftime("%Y-%m"), categories["Restaurants"]))
+        december = f"{today.year - 1 if today.month < 12 else today.year}-12"
+        conn.execute("INSERT INTO budgets (category_id, month, amount) VALUES (?, ?, 400), (?, ?, 250)",
+                     (categories["Shopping"], december, categories["Shopping"], f"{int(december[:4]) + 1}-01"))
 
         # The tuition is set aside from everyday spending, and the dashboard shows it apart.
         db.set_meta(conn, "everyday", json.dumps({"category": [str(categories["Education"])]}))
