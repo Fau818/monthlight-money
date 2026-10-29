@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% from "_macros.html" import pill, icon with context %}
+{% block title %}{{ plural(rows|length, "transaction") }} selected{% endblock %}
+{# A change to all of the ticked transactions at once (main.bulk_edit), which brings this page back. #}
+{% macro bulk(action="", cls="inline") %}
+  <form method="post" action="/transactions/bulk" class="{{ cls }}">
+    <input type="hidden" name="back" value="{{ here }}">
+    {% for r in rows %}<input type="hidden" name="ids" value="{{ r.id }}">{% endfor %}
+    {% if action %}<input type="hidden" name="action" value="{{ action }}">{% endif %}
+    {{ caller() }}
+  </form>
+{% endmacro %}
+{% block content %}
+<p><a class="back" href="{{ back }}">{{ icon("left") }} Back</a></p>
+{# The transactions ticked in the list, changed together; in the pane beside the list, or on a page of their own. #}
+<div class="sheet" data-transaction="selected">
+  <header class="sheet-bar">
+    <h2 class="sheet-kind">Selected</h2>
+    <div class="sheet-tools js-only">
+      <button type="button" class="small" data-clear-picks title="Untick them all">Clear selection</button>
+    </div>
+  </header>
+
+  <section class="sheet-hero">
+    <h1 class="sheet-name sheet-count">{{ plural(rows|length, "transaction") }}</h1>
+    <div class="sheet-totals">
+      {% if money_out %}<span>{{ money_out|money }} out</span>{% endif %}
+      {% if money_in %}<span class="money-in">{{ money_in|amount }} in</span>{% endif %}
+    </div>
+  </section>
+
+  <div class="sheet-fields">
+    {% if regular %}
+      <div class="field-row"><span class="field-label">Category</span>
+        <span class="field-value">
+          {% call bulk("category", "pill-pick") %}
+            {% set look = transaction_look(looks, "regular", category if category is number else none, category == "excluded") %}
+            {{ pill(look, "Mixed" if category == "mixed" else ("Excluded" if category == "excluded" else own_names.get(category, "Uncategorized")),
+                    cls="" if category is number or category == "excluded" else "empty") }}
+            <select name="category_id" data-autosubmit aria-label="Category for all of them" class="pill-menu">
+              <option value="" selected disabled>Put them all in…</option>
+              <option value="none">Uncategorized</option>
+              {% for o in categories %}<option value="{{ o.id }}">{{ o.emoji }} {{ o.label }}</option>{% endfor %}
+              <option value="excluded">🚫 Excluded</option>
+            </select>
+            <noscript><button type="submit" class="small">Save</button></noscript>
+          {% endcall %}
+          {% if regular|length < rows|length %}<span class="muted small">{{ plural(rows|length - regular|length, "other") }}, income or transfers, take none</span>{% endif %}
+        </span>
+      </div>
+    {% endif %}
+    <div class="field-row"><span class="field-label">Tags</span>
+      <div class="tag-chips">
+        {% for g in tag_looks.values() if g.id in tag_counts %}
+          {% call bulk("untag") %}
+            <input type="hidden" name="tag_id" value="{{ g.id }}">
+            <button type="submit" class="tag-chip tint-{{ g.color }}" title="Take “{{ g.name }}” off {{ 'it' if tag_counts[g.id] == 1 else 'the ' ~ tag_counts[g.id] }} with it">
+              <span>{{ g.name }}</span>{% if tag_counts[g.id] < rows|length %}<span class="muted small">{{ tag_counts[g.id] }}</span>{% endif %}<span class="tag-x" aria-hidden="true">{{ icon("close") }}</span>
+            </button>
+          {% endcall %}
+        {% endfor %}
+        {% call bulk("tag") %}
+          <input name="new_tag" class="tag-add" placeholder="Add a tag" aria-label="Add a tag to all of them" list="bulk-tag-names" autocomplete="off">
+          <datalist id="bulk-tag-names">{% for g in tag_looks.values() %}<option value="{{ g.name }}">{% endfor %}</datalist>
+        {% endcall %}
+      </div>
+    </div>
+    <div class="field-row"><span class="field-label">Reviewed</span>
+      <span class="field-value bulk-buttons">
+        {% call bulk("review") %}<button type="submit" class="small">{{ icon("check") }} Mark reviewed</button>{% endcall %}
+        {% call bulk("unreview") %}<button type="submit" class="small">Mark not reviewed</button>{% endcall %}
+      </span>
+    </div>
+    <div class="field-row"><span class="field-label">Together</span>
+      <span class="field-value bulk-buttons">
+        {% call bulk("link") %}<button type="submit" class="small" title="Show them together; each stays a transaction of its own">{{ icon("link") }} Link them</button>{% endcall %}
+        {% call bulk("unlink") %}<button type="submit" class="small">Unlink</button>{% endcall %}
+      </span>
+    </div>
+    {% call bulk("combine", "field-row combine-row") %}
+      <span class="field-label">Combine</span>
+      <span class="field-value bulk-buttons">
+        <input name="name" value="{{ rows[-1].name.split(':')[0].strip() }}" aria-label="Name of the combined line">
+        <button type="submit" class="small">Into one</button>
+      </span>
+    {% endcall %}
+  </div>
+
+  <section class="card">
+    <h2>The ones selected</h2>
+    <ul class="link-rows">
+      {% for r in rows %}
+        <li><a class="linked" href="/transactions/{{ r.id }}?back={{ back|urlencode }}">
+          <span>{{ r.name }}</span><span class="muted small">{{ r.date|short_date }} · {{ account_labels.get(r.account_id, r.account_name) }}</span>
+          <span class="num{% if r.amount > 0 %} money-in{% endif %}">{{ r.amount|amount }}</span></a></li>
+      {% endfor %}
+    </ul>
+  </section>
+</div>
+{% endblock %}

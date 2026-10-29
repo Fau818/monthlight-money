@@ -95,7 +95,8 @@
                  ("l" ~ t.link_id) if t.links else (("l" ~ t.split_link_id) if t.split_links)]|select|join(" ") %}
   {% set open = "/transactions/" ~ t.id ~ "?back=" ~ here|urlencode %}
   <li class="txn{% if not t.reviewed %} unreviewed{% endif %}{% if t.excluded %} excluded{% endif %}{% if t.reimburses_id %} payback{% endif %}{% if t.type == "transfer" %} transfer{% endif %}{% if t.split_parts %} split{% endif %}{% if t.joined %} joined{% endif %}{% if t.more %} more{% endif %}{% if t.chain_up %} chain-up{% endif %}{% if t.chain_down %} chain-down{% endif %}{% if t.chain_through %} chain-through{% endif %}" id="t{{ t.id }}"{% if link %} data-link="{{ link }}"{% endif %}>
-    {% if pick %}<input type="checkbox" class="pick" name="ids" value="{{ t.id }}" form="bulk" aria-label="Select {{ t.name }}"{% if t.split_from_id %} data-part-of="{{ t.split_from_id }}"{% endif %}>{% endif %}
+    {#- Over its badge, which it takes the place of under the pointer and once any is ticked (style.css). #}
+    {% if pick %}<label class="pick-box"><input type="checkbox" class="pick" name="ids" value="{{ t.id }}" form="bulk"{% if t.split_from_id %} data-part-of="{{ t.split_from_id }}"{% endif %}><span class="sr-only">Select {{ t.name }}</span></label>{% endif %}
     {{ badge(look) }}
     <div class="txn-main">
       <a class="txn-name" href="{{ open }}">{{ t.name }}</a>
@@ -151,7 +152,7 @@
   {% set all_excluded = s.split_excluded and s.split_excluded == s.split_count %}
   <li class="txn split-head{% if all_excluded %} excluded{% endif %}{% if s.chain_up %} chain-up{% endif %}{% if s.chain_down %} chain-down{% endif %}" id="split{{ s.id }}" data-link="{{ s.id }}{% if s.links %} l{{ s.link_id }}{% endif %}">
     {#- Ticks all of its parts in the list (app.js); it isn't sent itself. -#}
-    {% if pick %}<input type="checkbox" class="pick-group js-only" data-pick-group="{{ s.id }}" aria-label="Select all parts of {{ s.name }}">{% endif %}
+    {% if pick %}<label class="pick-box js-only"><input type="checkbox" class="pick-group" data-pick-group="{{ s.id }}"><span class="sr-only">Select all parts of {{ s.name }}</span></label>{% endif %}
     <span class="cat-icon tint-gray" aria-hidden="true">{{ icon("split") }}</span>
     <div class="txn-main">
       <a class="txn-name" href="/transactions/{{ s.id }}?back={{ here|urlencode }}">{{ s.name }}</a>

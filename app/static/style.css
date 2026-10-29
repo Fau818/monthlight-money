@@ -717,22 +717,15 @@ a.tag:hover { text-decoration: none; background: color-mix(in srgb, var(--tint) 
   .split-row + .split-row { padding-top: 8px; border-top: 1px solid var(--border); }
 }
 
-/* Selecting transactions: a checkbox column in the list, and a bar of actions pinned to the bottom. Thread lines are
-   left out while selecting (the indent still shows what belongs together). */
-.selecting .txn { grid-template-columns: 22px 28px minmax(0, 1fr) minmax(0, max-content) 7.5em 26px; grid-template-areas: "pick icon main cat amount review"; }
-.selecting .txn > .pick { grid-area: pick; width: 18px; height: 18px; min-height: 0; margin: 0; }
-.selecting .txn.joined::before, .selecting .txn.joined::after { display: none; }
-/* The checkboxes stay in one column; what hangs under another row moves in after them. */
-.selecting .txn.joined { padding-left: 0; grid-template-columns: 22px 60px minmax(0, 1fr) minmax(0, max-content) 7.5em 26px; }
-.selecting .txn.joined > .cat-icon { justify-self: end; }
-.selecting .txn > .pick-group { grid-area: pick; width: 18px; height: 18px; min-height: 0; margin: 0; }
-/* The line joining linked transactions stays, moved to the badges after the checkbox column (22px and a 12px gap). */
-.selecting .txn.chain-up::before, .selecting .txn.chain-down::after { left: 47px; }
-.selecting .txn.joined.chain-through::after { display: block; left: 47px; top: 0; }
-@container (max-width: 600px) {
-  .selecting .txn { grid-template-columns: 22px 28px minmax(0, 1fr) auto auto; grid-template-areas: "pick icon name name amount" "pick icon sub cat review"; }
-  .selecting .txn.joined { grid-template-columns: 22px 60px minmax(0, 1fr) auto auto; }
-}
+/* Ticking transactions: each row's checkbox lies over its badge, and takes its place under the pointer, once it has the
+   focus, and in every row once one is ticked; on a touch screen, tapping the badge ticks it. */
+.txn > .pick-box { grid-area: icon; z-index: 1; display: grid; place-items: center; width: 28px; height: 28px; cursor: pointer; opacity: 0; }
+.txn > .pick-box input { width: 18px; height: 18px; min-height: 0; margin: 0; cursor: pointer; }
+.txn:hover > .pick-box, .txn > .pick-box:focus-within, .months:has(.pick:checked) .txn > .pick-box { opacity: 1; }
+.txn:hover > .pick-box + .cat-icon, .txn > .pick-box:focus-within + .cat-icon, .months:has(.pick:checked) .txn > .pick-box + .cat-icon { visibility: hidden; }
+.txn:has(> .pick-box :checked) { background: var(--accent-wash); border-radius: 8px; }
+/* The row the keys act on (app.js), while they're in use, when it isn't the one open beside the list. */
+.keys .txn.current:not(.selected) { border-radius: 8px; box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent-text) 55%, transparent); }
 .bulk-bar { position: sticky; bottom: 12px; z-index: 4; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 12px;
   padding: 10px 14px; border-radius: 14px; background: var(--surface); border: 1px solid var(--border); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18); }
 .bulk-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
@@ -741,6 +734,30 @@ a.tag:hover { text-decoration: none; background: color-mix(in srgb, var(--tint) 
 .bulk-bar button[disabled] { cursor: default; }
 .bulk-bar.empty .bulk-group + .bulk-group { display: none; }
 @media (max-width: 959px) { .bulk-bar { bottom: calc(76px + env(safe-area-inset-bottom)); } }
+/* The bar shows once something is ticked. With JavaScript it only says how many, and opens the pane to change them; on
+   a wide screen the pane opens by itself, beside the list, in its place. */
+body:not(:has(.pick:checked)) .bulk-bar { display: none; }
+.js .bulk-bar .bulk-group:not(.bulk-summary) { display: none; }
+@media (min-width: 1280px) { .js .bulk-bar { display: none; } }
+/* The pane for the ticked ones (transactions_selected.html). */
+.sheet-count { font-size: 1.5rem; }
+.sheet-totals { display: flex; flex-wrap: wrap; gap: 4px 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.field-value { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.bulk-buttons form { display: inline; }
+.combine-row input { width: 14em; min-height: 32px; }
+.tag-chips button.tag-chip { font: inherit; font-size: 0.8rem; }
+/* The keys the list takes, shown with "?" (app.js). */
+.shortcuts { max-width: 420px; border: 1px solid var(--border); border-radius: 16px; padding: 18px 22px; background: var(--surface); color: var(--ink); }
+.shortcuts::backdrop { background: rgba(0, 8, 15, 0.45); }
+.shortcuts dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; margin: 12px 0 16px; }
+.shortcuts dt { display: flex; gap: 4px; }
+.shortcuts dd { margin: 0; color: var(--ink-2); }
+kbd { display: inline-grid; place-items: center; min-width: 26px; height: 26px; padding: 0 7px; border: 1px solid var(--border); border-bottom-width: 2px;
+  border-radius: 7px; background: var(--surface-2); font: 600 0.8rem var(--font); color: var(--ink); }
+.shortcuts-link { margin-left: auto; border: 0; background: none; min-height: 0; padding: 0; color: var(--muted); font-size: 0.85rem; font-weight: 500; }
+.shortcuts-link kbd { min-width: 22px; height: 22px; font-size: 0.75rem; }
+.shortcuts-link:hover { background: none; color: var(--accent-text); }
+@media (hover: none) { .shortcuts-link { display: none; } }  /* a touch screen has no keys to press */
 
 /* Safari on iPhone zooms in on any form field whose text is smaller than 16px. */
 @media (pointer: coarse) {

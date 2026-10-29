@@ -40,6 +40,7 @@ document.addEventListener("submit", (event) => {
 // replaced too, keeping the sidebar's scroll position.
 function swapIn(page, url) {
   const scrolled = [".sidebar", ".side-accounts"].map((part) => document.querySelector(part)?.scrollTop || 0);
+  const place = listRows().findIndex((row) => row.id === currentId);
   for (const part of ["main", ".sidebar", ".topbar", ".tabbar"]) {
     const fresh = page.querySelector(part);
     if (fresh) document.querySelector(part).replaceWith(fresh);
@@ -55,6 +56,10 @@ function swapIn(page, url) {
   updatePicks();
   watchOlder();
   markOpen();
+  // The row the keys act on stays, or, gone from the list (reviewed on the review list, say), the one now in its place.
+  const rows = listRows();
+  if (currentId && !document.getElementById(currentId) && place !== -1 && rows.length) currentId = rows[Math.min(place, rows.length - 1)].id;
+  markCurrent(false);
 }
 
 // Forms are posted to their action attribute: form.action would give a field named "action" instead, if one exists.
@@ -138,7 +143,10 @@ if (drawer) {
   wide.addEventListener("change", () => { if (drawer.open) showDrawer(); });  // docked or over the page, as the width allows
   document.addEventListener("keydown", (event) => {
     // A pane over the page closes with Escape by itself; one beside the list, here.
-    if (event.key === "Escape" && drawer.open && drawer.classList.contains("docked") && !event.defaultPrevented) closeDrawer();
+    if (event.key === "Escape" && drawer.open && drawer.classList.contains("docked") && !event.defaultPrevented) {
+      event.preventDefault();
+      closeDrawer();
+    }
   });
 }
 
@@ -331,7 +339,6 @@ function watchOlder() {
 
 async function loadOlder(link) {
   olderWatch.unobserve(link);
-  const ticked = new Set([...document.querySelectorAll("input.pick:checked")].map((pick) => pick.value));
   const focused = document.activeElement && document.activeElement.closest("main") ? document.activeElement.getAttribute("name") : null;
   try {
     const { page, url } = await fetchPage(link.href.split("#")[0]);
@@ -339,8 +346,6 @@ async function loadOlder(link) {
   } catch (error) {
     return;  // the link stays, to open the page by hand
   }
-  for (const pick of document.querySelectorAll("input.pick")) pick.checked = ticked.has(pick.value);
-  updatePicks();
   const again = focused && document.querySelector(`main [name="${CSS.escape(focused)}"]`);
   if (again) again.focus({ preventScroll: true });
 }
@@ -598,34 +603,198 @@ document.addEventListener("click", (event) => {
 });
 refreshSplits();
 
-// Selecting transactions in the list: how many are ticked, and one box for every one on the page.
+// Ticking transactions in the list. What's ticked stays ticked as the page changes around it (swapIn), as long as it's
+// listed. With two or more ticked on a wide screen, the pane beside the list changes them together; otherwise the bar
+// at the bottom does.
+const picked = new Set();
+
 function updatePicks() {
-  const bar = document.querySelector("[data-bulk]");
-  if (!bar) return;
   const picks = [...document.querySelectorAll("input.pick")];
-  const ticked = picks.filter((pick) => pick.checked).length;
-  bar.querySelector("[data-picked]").textContent = ticked ? `${ticked} selected` : "Tick the transactions to change";
-  for (const button of bar.querySelectorAll("button[name=action]")) button.disabled = !ticked;
-  bar.classList.toggle("empty", !ticked);  // the actions show once something is ticked
-  bar.querySelector("[data-pick-all]").checked = ticked > 0 && ticked === picks.length;
+  const listed = new Set(picks.map((pick) => pick.value));
+  for (const id of [...picked]) if (!listed.has(id)) picked.delete(id);
+  for (const pick of picks) pick.checked = picked.has(pick.value);
   // A split's box is ticked when all of its parts listed here are.
   for (const group of document.querySelectorAll("[data-pick-group]")) {
-    const parts = [...document.querySelectorAll(`input.pick[data-part-of="${CSS.escape(group.dataset.pickGroup)}"]`)];
+    const parts = picks.filter((pick) => pick.dataset.partOf === group.dataset.pickGroup);
     group.checked = parts.length > 0 && parts.every((pick) => pick.checked);
   }
+  const bar = document.querySelector("[data-bulk]");
+  if (!bar) return;
+  bar.querySelector("[data-picked]").textContent = picked.size ? `${picked.size} selected` : "Tick the transactions to change";
+  for (const button of bar.querySelectorAll("button[name=action]")) button.disabled = !picked.size;
+  bar.classList.toggle("empty", !picked.size);  // the actions show once something is ticked
+  bar.querySelector("[data-pick-all]").checked = picked.size > 0 && picked.size === picks.length;
+}
+
+// The pane shows what's ticked: two or more together, one on its own, none closes it. Beside the list, it follows as
+// they're ticked; over the page (a narrower screen), once asked to (`now`).
+let pickTimer = null;
+function showPicked(now = false) {
+  clearTimeout(pickTimer);
+  pickTimer = setTimeout(async () => {
+    if (!drawer || !(wide.matches || now)) return;
+    const ids = [...picked];
+    if (now && ids.length === 1) {
+      openTransaction(`/transactions/${ids[0]}?back=${encodeURIComponent(location.pathname + location.search)}`).catch(() => {});
+      return;
+    }
+    if (ids.length < 2) {
+      if (openId !== "selected") return;
+      if (ids.length) openTransaction(`/transactions/${ids[0]}?back=${encodeURIComponent(location.pathname + location.search)}`).catch(() => {});
+      else closeDrawer();
+      return;
+    }
+    const query = new URLSearchParams([...ids.map((id) => ["ids", id]), ["back", location.pathname + location.search]]);
+    try {
+      const { page } = await fetchPage(`/transactions/selected?${query}`);
+      const sheet = page.querySelector(".sheet");
+      if (!sheet || [...picked].join() !== ids.join()) return;  // ticked differently meanwhile: the newer call shows it
+      showSheet(sheet);
+      showDrawer();
+      markOpen();
+    } catch (error) {
+      // the bar at the bottom can still change them
+    }
+  }, 120);
 }
 
 document.addEventListener("change", (event) => {
-  if (event.target.matches("[data-pick-all]")) {
-    for (const pick of document.querySelectorAll("input.pick")) pick.checked = event.target.checked;
+  const target = event.target;
+  if (!target.matches("input.pick, [data-pick-all], [data-pick-group]")) return;
+  const all = [...document.querySelectorAll("input.pick")];
+  const changed = target.matches("[data-pick-all]") ? all
+    : target.matches("[data-pick-group]") ? all.filter((pick) => pick.dataset.partOf === target.dataset.pickGroup) : [target];
+  for (const pick of changed) {
+    if (target.checked) picked.add(pick.value);
+    else picked.delete(pick.value);
   }
-  if (event.target.matches("[data-pick-group]")) {
-    const parts = document.querySelectorAll(`input.pick[data-part-of="${CSS.escape(event.target.dataset.pickGroup)}"]`);
-    for (const pick of parts) pick.checked = event.target.checked;
-  }
-  if (event.target.matches("input.pick, [data-pick-all], [data-pick-group]")) updatePicks();
+  updatePicks();
+  showPicked();
+});
+
+document.addEventListener("click", (event) => {
+  if (event.target.closest && event.target.closest("[data-edit-picks]")) showPicked(true);
+  if (!event.target.closest || !event.target.closest("[data-clear-picks]")) return;
+  picked.clear();
+  updatePicks();
+  if (openId === "selected") closeDrawer();
 });
 updatePicks();
+
+// The keys the list takes (the shortcuts dialog lists them): not while typing, nor with a modifier key, nor while a
+// dialog is open over the page.
+let currentId = null;  // the element id of the row the keys act on, like "t12"
+
+function listRows() {
+  return document.querySelector("[data-shortcuts]") ? [...document.querySelectorAll("ul.txns > li.txn")] : [];
+}
+
+function markCurrent(scroll) {
+  for (const row of document.querySelectorAll(".txn.current")) row.classList.remove("current");
+  const row = currentId && document.getElementById(currentId);
+  if (!row) return null;
+  row.classList.add("current");
+  if (scroll) row.scrollIntoView({ block: "nearest" });
+  return row;
+}
+
+function openRow(row) {
+  const link = row && row.querySelector("a.txn-name");
+  if (link) openTransaction(link.href).catch(() => window.location.assign(link.href));
+}
+
+// ↑ and ↓: the next row or the one before, from the one the keys act on, else the one open; an open transaction follows.
+function moveCurrent(step) {
+  const rows = listRows();
+  if (!rows.length) return;
+  let index = rows.findIndex((row) => row.id === currentId);
+  if (index === -1) index = rows.findIndex((row) => row.classList.contains("selected"));
+  index = index === -1 ? (step > 0 ? 0 : rows.length - 1) : Math.max(0, Math.min(rows.length - 1, index + step));
+  currentId = rows[index].id;
+  const row = markCurrent(true);
+  if (drawer && drawer.open && drawer.classList.contains("docked") && openId !== "selected") openRow(row);
+}
+
+// R: the ticked ones, else the row the keys act on, marked as reviewed.
+async function markReviewed(row) {
+  const ids = picked.size ? [...picked] : row && /^t\d+$/.test(row.id) ? [row.id.slice(1)] : [];
+  if (!ids.length) return;
+  const body = new FormData();
+  for (const id of ids) body.append("ids", id);
+  body.append("back", location.pathname + location.search);
+  try {
+    const { page, url } = await fetchPage("/transactions/review", { method: "POST", body });
+    swapIn(page, url);
+  } catch (error) {
+    window.location.reload();
+  }
+}
+
+// C: the category menu of the row, or of the transaction open beside the list when it's that one.
+function pickCategory(row) {
+  const open = drawer && drawer.open && row.id === `t${openId}` && drawer.querySelector(".sheet [name=category_id]");
+  const menu = open || row.querySelector(".pill-menu");
+  if (!menu) return;
+  menu.focus();
+  try {
+    menu.showPicker();
+  } catch (error) {
+    // NOTE: a browser that can't open it from a script leaves it focused, for the arrow keys or the space bar
+  }
+}
+
+function focusSearch() {
+  const field = [...document.querySelectorAll(".side-search input, .toolbar .search input")].find((input) => input.offsetParent);
+  if (field) {
+    field.focus();
+    field.select();
+  }
+}
+
+document.addEventListener("keydown", (event) => {
+  const help = document.querySelector("[data-shortcuts]");
+  if (!help || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return;
+  if (event.target.closest && event.target.closest("input:not([type=checkbox], [type=radio]), textarea, select, [contenteditable]")) return;
+  if (help.open || (drawer && drawer.open && !drawer.classList.contains("docked"))) return;
+  const row = currentId && document.getElementById(currentId);
+  const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+  if (key === "ArrowDown" || key === "ArrowUp") {
+    event.preventDefault();
+    document.body.classList.add("keys");  // the row they act on shows, until the pointer's back (below)
+    moveCurrent(key === "ArrowDown" ? 1 : -1);
+  } else if (key === "Enter" && row && !event.target.closest("a, button, summary, label")) {
+    event.preventDefault();
+    openRow(row);
+  } else if (key === "x" && row) {
+    const pick = row.querySelector("input.pick, input.pick-group");
+    if (pick) pick.click();
+  } else if (key === "r") {
+    markReviewed(row);
+  } else if (key === "c" && row) {
+    event.preventDefault();
+    pickCategory(row);
+  } else if (key === "/") {
+    event.preventDefault();
+    focusSearch();
+  } else if (key === "?") {
+    help.showModal();
+  } else if (key === "Escape" && picked.size) {
+    picked.clear();  // NOTE: the menu and the pane take Escape first (above), so unticking comes once they're closed
+    updatePicks();
+  }
+});
+
+document.addEventListener("pointerdown", () => document.body.classList.remove("keys"));
+
+// A row clicked or ticked is the one the keys act on from then on.
+document.addEventListener("click", (event) => {
+  const row = event.target.closest && event.target.closest("ul.txns > li.txn");
+  if (row && document.querySelector("[data-shortcuts]")) {
+    currentId = row.id;
+    markCurrent(false);
+  }
+  if (event.target.closest && event.target.closest("[data-show-shortcuts]")) document.querySelector("[data-shortcuts]").showModal();
+});
 
 async function postJSON(url, body) {
   const response = await fetch(url, {

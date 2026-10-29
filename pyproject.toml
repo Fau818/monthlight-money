@@ -33,4 +33,4 @@ line-length = 120  # NOTE: the code's lines run long; at ruff's default of 88, i
 
 [tool.ruff.lint.flake8-bugbear]
 # NOTE: FastAPI declares form fields and dependencies as default values, which B008 would flag
-extend-immutable-calls = ["fastapi.Body", "fastapi.Depends", "fastapi.File", "fastapi.Form"]
+extend-immutable-calls = ["fastapi.Body", "fastapi.Depends", "fastapi.File", "fastapi.Form", "fastapi.Query"]

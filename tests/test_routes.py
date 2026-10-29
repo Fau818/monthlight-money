@@ -303,7 +303,7 @@ def test_income_and_transfers_take_no_category(client, settings):
     import_sample(client, settings)
     shown = client.get("/transactions?transfers=1").text
     # 10 rows: 1 income and 2 transfers show their type; only the 7 regular ones get a category menu.
-    assert shown.count('name="category_id"') == 7 and ">Income</span>" in shown and ">Transfer</span>" in shown
+    assert shown.count('class="pill-menu"') == 7 and ">Income</span>" in shown and ">Transfer</span>" in shown
     # Uncategorized means regular transactions without one; the transfers have none but don't count.
     assert "No transactions match." in client.get("/transactions?category=none&transfers=1").text
     conn = sync.connect(settings.db_path)
@@ -774,12 +774,12 @@ def test_selected_transactions_change_together(client, settings):
     conn = sync.connect(settings.db_path)
     ids = lambda *names: [conn.execute("SELECT id FROM transactions WHERE name = ?", (n,)).fetchone()[0] for n in names]
     shell, amazon, payment = ids("Shell", "Amazon", "Chase Payment")
-    page_text = unescape(client.get("/transactions?select=1&transfers=1").text)
-    assert f'name="ids" value="{shell}" form="bulk"' in page_text and 'id="bulk"' in page_text and "Done selecting" in page_text
-    assert 'form="bulk"' not in client.get("/transactions").text  # checkboxes only while selecting
+    page_text = unescape(client.get("/transactions?transfers=1").text)
+    assert f'name="ids" value="{shell}" form="bulk"' in page_text and 'id="bulk"' in page_text  # every row can be ticked
+    assert 'form="bulk"' not in client.get("/").text  # the dashboard's rows can't
 
     bulk = lambda action, picked, **form: unescape(client.post("/transactions/bulk", data={"ids": [str(i) for i in picked], "action": action,
-                                                                                         "back": "/transactions?select=1", **form}).text)
+                                                                                         "back": "/transactions", **form}).text)
     assert "Select some transactions first" in bulk("review", [])
     from app import tags
     with conn:
@@ -800,6 +800,10 @@ def test_selected_transactions_change_together(client, settings):
     with conn:
         conn.execute(f"UPDATE transactions SET reviewed = 0 WHERE id IN ({shell}, {amazon})")
     assert "Marked 2 transactions as reviewed" in bulk("review", [shell, amazon])
+    assert "Marked 2 transactions as not reviewed yet" in bulk("unreview", [shell, amazon])
+    assert {r[0] for r in conn.execute(f"SELECT reviewed FROM transactions WHERE id IN ({shell}, {amazon})")} == {0}
+    assert "2 transactions excluded from spending" in bulk("category", [shell, amazon], category_id="excluded")  # as the menus offer it
+    assert "Tagged 2 transactions “Road trip”" in bulk("tag", [shell, amazon], new_tag=" Road trip ")  # a new tag, by its name
 
     # Combining needs one account, rows without a bank record, a few days apart at most.
     joes = conn.execute("SELECT id FROM transactions WHERE name = 'Trader Joe''s' AND date = '2026-09-08'").fetchone()[0]
@@ -810,6 +814,24 @@ def test_selected_transactions_change_together(client, settings):
     assert "Combined 2 transactions into “Groceries run”" in bulk("combine", [first_joes, netflix], name="Groceries run")
     combined = conn.execute("SELECT id, amount FROM transactions WHERE source = 'group'").fetchone()
     assert combined["amount"] == round(-54.20 - 15.49, 2) and reports.month_totals(conn, "2026-09") == before
+    conn.close()
+
+
+def test_the_ticked_ones_open_together(client, settings):
+    import_sample(client, settings)
+    conn = sync.connect(settings.db_path)
+    ids = [conn.execute("SELECT id FROM transactions WHERE name = ?", (n,)).fetchone()[0] for n in ("Shell", "Amazon", "Chase Payment")]
+    groceries = conn.execute("SELECT id FROM categories WHERE name = 'Groceries'").fetchone()[0]
+    query = "&".join(f"ids={i}" for i in ids) + "&back=/transactions?period=this-year"
+    text = unescape(client.get(f"/transactions/selected?{query}").text)
+    assert 'data-transaction="selected"' in text and "3 transactions</h1>" in text and "$540.00 out" in text and "+$20.00 in" in text
+    assert "Mixed</span>" in text and "1 other, income or transfers, take none" in text  # Shell and Amazon differ; the transfer takes none
+    # Each change goes to all of them and brings this page back, for the pane to show again.
+    here = f"/transactions/selected?{query}"
+    response = client.post("/transactions/bulk", data={"ids": ids[:2], "action": "category", "category_id": groceries, "back": here})
+    assert response.url.path == "/transactions/selected" and "2 transactions now in Groceries" in unescape(response.text)
+    assert "Groceries</span>" in unescape(response.text)  # the two regular ones share it now
+    assert "Tick the transactions to change together" in unescape(client.get("/transactions/selected?back=/transactions").text)
     conn.close()
 
 

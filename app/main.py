@@ -17,7 +17,7 @@ from itertools import pairwise
 from pathlib import Path
 from urllib.parse import quote, unquote, urlencode, urlsplit
 
-from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -534,7 +534,7 @@ def register_routes(app: FastAPI) -> None:
         An address that holds them otherwise (as the filter menu sends them, say) leads to the one that holds them so."""
         query = request.query_params
         filters = list_filters(query.multi_items())
-        place = {k: v for k in ("select", "oldest", "upto") if (v := query.get(k, "").strip())}
+        place = {k: v for k in ("oldest", "upto") if (v := query.get(k, "").strip())}
         pairs = filter_pairs(filters) + list(place.items())
         if sorted(query.multi_items()) != sorted(pairs):
             return RedirectResponse("/transactions" + (f"?{urlencode(pairs)}" if pairs else ""), status_code=303)
@@ -573,9 +573,9 @@ def register_routes(app: FastAPI) -> None:
         hidden = find_transactions(conn, **criteria, linked_transfers=True, limit=0)[1] if hide else 0
         categories = category_options(conn)
 
-        def link(select: bool = bool(place.get("select")), **changes) -> str:
-            """Returns the list's address with these filters changed ("" or [] for none), selecting or not."""
-            pairs = filter_pairs({**filters, **changes}) + ([("select", "1")] if select else [])
+        def link(**changes) -> str:
+            """Returns the list's address with these filters changed ("" or [] for none)."""
+            pairs = filter_pairs({**filters, **changes})
             return "/transactions" + (f"?{urlencode(pairs)}" if pairs else "")
 
         chips = filter_chips(conn, filters, categories, link)
@@ -589,7 +589,6 @@ def register_routes(app: FastAPI) -> None:
             periods=PERIODS, amount_choices=AMOUNT_CHOICES, categories=categories, hidden_transfers=hidden,
             show_transfers_link=link(transfers="1"), hide_transfers_link=link(transfers=""),
             review_link=link(review="1"), all_link=link(review=""),
-            selecting=bool(place.get("select")), select_link=link(select=True), done_link=link(select=False),
             accounts=conn.execute("SELECT id, name, mask FROM accounts ORDER BY hidden, archived, name COLLATE NOCASE").fetchall(),
             month_options=[r[0] for r in conn.execute("SELECT DISTINCT substr(date, 1, 7) FROM transactions ORDER BY 1 DESC")],
         )
@@ -698,11 +697,31 @@ def register_routes(app: FastAPI) -> None:
             conn.executemany("UPDATE transactions SET reviewed = 1 WHERE id = ?", [(i,) for i in ids])
         return redirect(safe_back(back, "/transactions"), f"Marked {plural(len(ids), 'transaction')} as reviewed.")
 
+    @app.get("/transactions/selected")
+    def selected_transactions(request: Request, ids: list[int] = Query([]), back: str = "/transactions", conn=Depends(get_db)):
+        """The transactions ticked in the list (`ids`), to change together: in the pane beside the list (app.js), or on
+        a page of their own."""
+        rows = conn.execute(f"""SELECT t.*, a.name AS account_name FROM transactions t JOIN accounts a ON a.id = t.account_id
+                                WHERE t.id IN ({','.join('?' * len(ids))}) ORDER BY t.date DESC, t.id DESC""", ids).fetchall() if ids else []
+        if not rows:
+            return redirect(safe_back(back, "/transactions"), "Tick the transactions to change together.")
+        regular = [r for r in rows if r["type"] == "regular"]
+        shared = {r["category_id"] for r in regular} | ({"excluded"} if any(r["excluded"] for r in regular) else set())
+        tagged = tags.tags_by_transaction(conn, [r["id"] for r in rows])
+        here = request.url.path + "?" + request.url.query
+        return render(request, conn, "transactions_selected.html", rows=rows, back=safe_back(back, "/transactions"), here=here,
+                      own_names=dict(conn.execute("SELECT id, name FROM categories").fetchall()),
+                      regular=regular, category=next(iter(shared)) if len(shared) == 1 else "mixed", categories=category_options(conn),
+                      tag_counts=Counter(g for r in rows for g in tagged.get(r["id"], [])),
+                      money_out=round(-sum(r["amount"] for r in rows if r["amount"] < 0), 2),
+                      money_in=round(sum(r["amount"] for r in rows if r["amount"] > 0), 2))
+
     @app.post("/transactions/bulk")
-    def bulk_edit(ids: list[int] = Form([]), action: str = Form(""), tag_id: str = Form(""), category_id: str = Form(""),
-                  name: str = Form(""), back: str = Form("/transactions"), conn=Depends(get_db)):
-        """Does `action` to the transactions selected in the list (`ids`): tag or untag (tag_id), category (category_id),
-        review, exclude, include, link or unlink (links.py), or combine (into one named `name`, see splits.combine)."""
+    def bulk_edit(ids: list[int] = Form([]), action: str = Form(""), tag_id: str = Form(""), new_tag: str = Form(""),
+                  category_id: str = Form(""), name: str = Form(""), back: str = Form("/transactions"), conn=Depends(get_db)):
+        """Does `action` to the transactions selected in the list (`ids`): tag (tag_id, or a new tag named new_tag) or
+        untag (tag_id), category (category_id, where "excluded" excludes them), review or unreview, exclude, include,
+        link or unlink (links.py), or combine (into one named `name`, see splits.combine)."""
         back = safe_back(back, "/transactions")
         rows = conn.execute(f"SELECT * FROM transactions WHERE id IN ({','.join('?' * len(ids))}) ORDER BY date, id", ids).fetchall() if ids else []
         if not rows:
@@ -713,6 +732,8 @@ def register_routes(app: FastAPI) -> None:
         skipped = f" {count(len(rows) - len(regular))} left as they were: income and transfers take neither." if len(regular) < len(rows) else ""
         with conn:
             if action in ("tag", "untag"):
+                typed = tags.parse_names(new_tag) if action == "tag" and not tag_id.isdigit() else []
+                tag_id = str(tags.get_or_create(conn, typed[0])) if typed else tag_id
                 tag = conn.execute("SELECT id, name FROM tags WHERE id = ?", (optional_int(tag_id),)).fetchone() if tag_id.isdigit() else None
                 if tag is None:
                     return redirect(back, "Pick a tag first.")
@@ -720,6 +741,8 @@ def register_routes(app: FastAPI) -> None:
                     tags.add(conn, tag["id"], [r["id"] for r in rows])
                     return redirect(back, f"Tagged {count(len(rows))} “{tag['name']}”.")
                 return redirect(back, f"Took “{tag['name']}” off {count(tags.remove(conn, tag['id'], [r['id'] for r in rows]))}.")
+            if action == "category" and category_id == "excluded":
+                action = "exclude"  # NOTE: a choice beside the categories, as in the list's menus
             if action == "category":
                 new_category = optional_int(category_id)  # "none" means uncategorized
                 if not category_id or (new_category is not None and category_name(conn, new_category) is None):
@@ -727,9 +750,9 @@ def register_routes(app: FastAPI) -> None:
                 conn.executemany("UPDATE transactions SET category_id = ?, excluded = 0, user_edited = 1, reviewed = 1 WHERE id = ?",
                                  [(new_category, r["id"]) for r in regular])
                 return redirect(back, f"{count(len(regular))} now in {category_name(conn, new_category) or 'Uncategorized'}.{skipped}")
-            if action == "review":
-                conn.executemany("UPDATE transactions SET reviewed = 1 WHERE id = ?", [(r["id"],) for r in rows])
-                return redirect(back, f"Marked {count(len(rows))} as reviewed.")
+            if action in ("review", "unreview"):
+                conn.executemany("UPDATE transactions SET reviewed = ? WHERE id = ?", [(int(action == "review"), r["id"]) for r in rows])
+                return redirect(back, f"Marked {count(len(rows))} as {'reviewed' if action == 'review' else 'not reviewed yet'}.")
             if action in ("exclude", "include"):
                 conn.executemany("UPDATE transactions SET excluded = ?, user_edited = 1 WHERE id = ?",
                                  [(int(action == "exclude"), r["id"]) for r in regular])

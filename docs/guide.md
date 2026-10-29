@@ -69,11 +69,28 @@ When both sides of a move arrive (opposite amounts on two of your accounts, with
 
 ## Linking transactions that belong together
 
-Rent paid in two payments, say: **Transactions → Select**, tick them, and press **🔗 Link**. They show together on the biggest one's day, joined by a line, and each keeps its own amount, category and date. Open one to see their total or to unlink it.
+Rent paid in two payments, say: tick them on **Transactions** and press **Link them**. They show together on the biggest one's day, joined by a line, and each keeps its own amount, category and date. Open one to see their total or to unlink it.
 
 ## Changing many at once
 
-**Transactions → Select**, tick the rows (or **All on this page**), then use the bar at the bottom: add or remove a tag, set a category, mark reviewed, exclude or include, link or unlink, or **Combine into one**.
+1. Tick the transactions: point at a row's badge (or tap it on a phone) and it turns into a checkbox.
+2. With two or more ticked, they open together beside the list. On a smaller screen, press **Change them** in the bar at the bottom.
+3. Change them all at once: the category (or **Excluded**), tags, reviewed or not, link or unlink, or combine them into one.
+4. **Clear selection** unticks them.
+
+## Keyboard shortcuts
+
+On **Transactions**, press **?** to see them:
+
+| Key | |
+|---|---|
+| ↑ ↓ | Move through the list; an open transaction follows |
+| Return | Open the transaction |
+| X | Tick it, or untick it |
+| R | Mark it reviewed, or the ticked ones |
+| C | Change its category |
+| / | Search |
+| Esc | Close the menu or the transaction, then untick |
 
 ## Tags
 

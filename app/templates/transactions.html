@@ -111,9 +111,8 @@
     </label>
     <a class="chip{% if filters.review == "1" %} on{% endif %}" href="{{ all_link if filters.review == "1" else review_link }}"{% if filters.review == "1" %} aria-current="true"{% endif %}>
       To review{% if review_count %} <b class="count">{{ review_count }}</b>{% endif %}</a>
-    <a class="chip{% if selecting %} on{% endif %}" href="{{ done_link if selecting else select_link }}"{% if selecting %} aria-current="true"{% endif %}>{{ icon("check") }} {{ "Done selecting" if selecting else "Select" }}</a>
-    {% if selecting %}<input type="hidden" name="select" value="1">{% endif %}
     <button type="submit" class="js-hide">Filter</button>
+    <button type="button" class="shortcuts-link js-only" data-show-shortcuts title="Keyboard shortcuts (?)"><kbd>?</kbd> Shortcuts</button>
   </div>
   {% if chips %}
     <div class="active-filters">
@@ -149,12 +148,12 @@
 </div>
 
 {% if rows %}
-  <div class="months{% if selecting %} selecting{% endif %}">
+  <div class="months">
   {% if by_amount %}
     {# Biggest first, in one list: each row with its day, as days don't group them. #}
     <section class="card list-card">
       <header class="month-head"><h2>Biggest first</h2></header>
-      <ul class="txns">{% for t in rows %}{{ transaction_row(t, here, categories, selecting, with_day=true) }}{% endfor %}</ul>
+      <ul class="txns">{% for t in rows %}{{ transaction_row(t, here, categories, true, with_day=true) }}{% endfor %}</ul>
     </section>
   {% else %}
     {# A card for each month: its totals, as on the dashboard, when the whole month is listed, then its days. #}
@@ -180,20 +179,22 @@
         {% for g in m.days %}
           <section class="day">
             <h3 class="day-head"><span>{{ g.label }}</span>{% if g.spent > 0 %}<span>{{ g.spent|money }}</span>{% endif %}</h3>
-            <ul class="txns">{% for t in g.rows %}{% if t.kind == "split" %}{{ split_head(t, here, selecting) }}{% else %}{{ transaction_row(t, here, categories, selecting) }}{% endif %}{% endfor %}</ul>
+            <ul class="txns">{% for t in g.rows %}{% if t.kind == "split" %}{{ split_head(t, here, true) }}{% else %}{{ transaction_row(t, here, categories, true) }}{% endif %}{% endfor %}</ul>
           </section>
         {% endfor %}
       </section>
     {% endfor %}
   {% endif %}
   </div>
-  {% if selecting %}
-    {# The rows' checkboxes belong to this form (their form="bulk"), as the rows hold forms of their own. #}
-    <form id="bulk" method="post" action="/transactions/bulk" class="bulk-bar" data-bulk data-swap>
+  {# The rows' checkboxes belong to this form (their form="bulk"), as the rows hold forms of their own. It shows once one
+     is ticked; with JavaScript on a wide screen, the pane beside the list takes its place (app.js). #}
+  <form id="bulk" method="post" action="/transactions/bulk" class="bulk-bar" data-bulk data-swap>
       <input type="hidden" name="back" value="{{ here }}">
-      <div class="bulk-group">
+      <div class="bulk-group bulk-summary">
         <label class="check js-only"><input type="checkbox" data-pick-all> All on this page</label>
         <strong data-picked>Tick the transactions to change</strong>
+        <button type="button" class="small primary js-only" data-edit-picks>Change them</button>
+        <button type="button" class="small js-only" data-clear-picks>Clear</button>
       </div>
       <div class="bulk-group">
         <select name="tag_id" aria-label="Tag"><option value="">Tag…</option>{% for g in tag_looks.values() %}<option value="{{ g.id }}">{{ g.name }}</option>{% endfor %}</select>
@@ -206,6 +207,7 @@
       </div>
       <div class="bulk-group">
         <button type="submit" name="action" value="review" class="small">{{ icon("check") }} Reviewed</button>
+        <button type="submit" name="action" value="unreview" class="small">Not reviewed</button>
         <button type="submit" name="action" value="exclude" class="small">Exclude</button>
         <button type="submit" name="action" value="include" class="small">Include</button>
       </div>
@@ -217,11 +219,25 @@
         <input name="name" placeholder="Name, e.g. Amazon" aria-label="Name of the combined transaction" class="bulk-name">
         <button type="submit" name="action" value="combine" class="small">Combine into one</button>
       </div>
-    </form>
-  {% endif %}
+  </form>
   {# Loaded as the list scrolls near it (app.js); without JavaScript, a link to the list with them. #}
   {% if more %}<p class="older"><a class="button" href="{{ more }}" data-older>{{ (older_month|month_label ~ " and earlier") if older_month else "Show more" }}</a></p>{% endif %}
 {% else %}
   <div class="card"><p class="empty">No transactions match.</p></div>
 {% endif %}
+{# The keys the list takes (app.js), shown with "?". #}
+<dialog class="shortcuts" data-shortcuts aria-labelledby="shortcuts-head">
+  <h2 id="shortcuts-head">Keyboard shortcuts</h2>
+  <dl>
+    <dt><kbd>↑</kbd><kbd>↓</kbd></dt><dd>Move through the list; an open transaction follows</dd>
+    <dt><kbd>Return</kbd></dt><dd>Open the transaction</dd>
+    <dt><kbd>X</kbd></dt><dd>Tick it, or untick it</dd>
+    <dt><kbd>R</kbd></dt><dd>Mark it reviewed, or the ticked ones</dd>
+    <dt><kbd>C</kbd></dt><dd>Change its category</dd>
+    <dt><kbd>/</kbd></dt><dd>Search</dd>
+    <dt><kbd>Esc</kbd></dt><dd>Close the menu or the transaction, then untick</dd>
+    <dt><kbd>?</kbd></dt><dd>Show these keys</dd>
+  </dl>
+  <form method="dialog"><button type="submit" class="primary">Close</button></form>
+</dialog>
 {% endblock %}
