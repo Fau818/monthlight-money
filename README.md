@@ -5,8 +5,8 @@ budgets, and shows where each month's money went. It runs on your own computer, 
 It's inspired by [Copilot Money](https://copilot.money) (and not affiliated with it), and it can import your history from it.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dashboard-v0.2-dark.png">
-  <img alt="The dashboard: this month's spending against the budget, transactions to review, budgets and upcoming bills" src="docs/images/dashboard-v0.2-light.png">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/dashboard-v0.2.1-dark.png">
+  <img alt="The dashboard: this month's spending against the budget, transactions to review, budgets and upcoming bills" src="docs/images/dashboard-v0.2.1-light.png">
 </picture>
 
 ## Features
@@ -18,8 +18,8 @@ It's inspired by [Copilot Money](https://copilot.money) (and not affiliated with
 - **Your data stays with you:** one SQLite file, a backup every day, and a CSV export.
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/images/transactions-v0.2-dark.png">
-  <img alt="Transactions by month and day, with an order split into its parts, and a transaction open beside the list" src="docs/images/transactions-v0.2-light.png">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/transactions-v0.2.1-dark.png">
+  <img alt="Transactions by month and day, with an order split into its parts, and a transaction open beside the list" src="docs/images/transactions-v0.2.1-light.png">
 </picture>
 
 ## Getting started
